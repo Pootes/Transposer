@@ -81,6 +81,18 @@
   button.btn.primary{background:var(--accent);color:var(--accent-fg);border-color:var(--accent)}
   button.btn:disabled{opacity:.5;cursor:not-allowed}
   .filerow{display:flex;flex-wrap:wrap;gap:12px;align-items:center;margin-top:12px}
+  .fetchrow{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-top:12px}
+  .fetchrow input{flex:1 1 260px;min-width:0;font:inherit;font-size:.9rem;padding:9px 11px;border-radius:8px;border:1px solid var(--line);background:var(--surface);color:var(--fg)}
+  .fetchrow input:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+  .fetchrow .btn{white-space:nowrap}
+  .results{margin-top:12px;display:flex;flex-direction:column;gap:6px}
+  .results[hidden]{display:none}
+  .results .result{display:flex;gap:10px;align-items:baseline;text-align:left;width:100%;font:inherit;cursor:pointer;border:1px solid var(--line);background:var(--surface);color:var(--fg);border-radius:8px;padding:9px 12px}
+  .results .result:hover{border-color:var(--accent)}
+  .results .result span{color:var(--muted);font-size:.8rem}
+  .results .muted{color:var(--muted);font-size:.86rem;margin:2px 0}
+  .fetchnote{margin-top:12px;font-size:.8rem;color:var(--muted)}
+  .fetchnote b{color:var(--fg);font-weight:600}
   input[type=file]{font:inherit;font-size:.85rem;color:var(--muted)}
   textarea{width:100%;margin-top:12px;min-height:100px;resize:vertical;font-family:ui-monospace,Menlo,Consolas,monospace;font-size:.8rem;line-height:1.5;padding:12px;border-radius:var(--radius);border:1px solid var(--line);background:var(--surface);color:var(--fg)}
   textarea:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
@@ -159,6 +171,20 @@
   <div class="paper"><div id="score"><div class="empty">Engine loading. When ready, <b>Load sample</b> or a MusicXML / .mxl file below.</div></div></div>
 
   <div class="io">
+    <div class="iohead"><h2>Get music</h2></div>
+    <div class="fetchrow">
+      <input type="url" id="url" spellcheck="false" placeholder="Paste a direct link to a .musicxml / .mxl / .xml / .mei file">
+      <button class="btn" id="url-load" type="button">Fetch link</button>
+    </div>
+    <div class="fetchrow">
+      <input type="search" id="q" spellcheck="false" placeholder="Search open tune libraries by name (e.g. Cooley's, Drowsy Maggie)">
+      <button class="btn" id="search" type="button">Search</button>
+    </div>
+    <div class="results" id="results" hidden></div>
+    <p class="fetchnote">Fetching works only for sources that permit cross-origin requests &mdash; <b>raw GitHub links</b> are the reliable case. Search covers <b>thesession.org</b> (traditional / folk tunes only, not copyrighted pop). Keep any copyrighted files off public hosting.</p>
+  </div>
+
+  <div class="io">
     <div class="iohead">
       <h2>Input</h2>
       <div class="rowbtns">
@@ -174,6 +200,8 @@
   </div>
 
   <div class="notes">
+    <h3>Getting music by name or link</h3>
+    <p><b>Fetch link</b> pulls a MusicXML/MEI/<code>.mxl</code> file straight from a URL, as long as that host allows cross-origin requests &mdash; raw GitHub file links are the dependable case. <b>Search</b> queries <a href="https://thesession.org" target="_blank" rel="noopener">thesession.org</a>, an open library of traditional and folk tunes; pick a result and it loads, transposes, and plays like any other input. There is no free, legal way to fetch copyrighted pop songs by name, so those are not searchable &mdash; export them from a notation app and load the file.</p>
     <h3>Source detection</h3>
     <p>On load, the tool reads the file's first part &mdash; its instrument name, General MIDI program, and any written-pitch <code>transpose</code> &mdash; and sets <b>Source part is written for</b> automatically (concert, B&flat;, F, or E&flat;). It also flags grand-staff piano files, where <b>Melody only</b> is the right choice. It is a best guess from the file's metadata; change the dropdown yourself and it stays on your choice.</p>
     <h3>Melody extraction</h3>
@@ -216,6 +244,7 @@
   var STEP = { C:0, D:2, E:4, F:5, G:7, A:9, B:11 };
 
   var tk = null, rawXML = null, mode = "alto", scale = 40, resizeTimer = null;
+  var inputKind = "xml", abcRaw = null; // "xml" = MusicXML/MEI pipeline, "abc" = fetched tune
 
   var SAMPLE = [
     '<?xml version="1.0" encoding="UTF-8"?>',
@@ -331,20 +360,23 @@
     errEl.textContent = "";
     refreshChip();
     viewLabel.textContent = mode === "alto" ? "Alto saxophone (written)" : "Original (as loaded)";
-    var xml = displayXML();
-    if(!tk || !xml){ return; }
+    if(!tk){ return; }
+    var data, from;
+    if(inputKind === "abc"){ if(!abcRaw){ return; } data = abcRaw; from = "abc"; }
+    else { data = displayXML(); from = "auto"; if(!data){ return; } }
     var w = Math.max(560, score.clientWidth);
     tk.setOptions({
+      from: from,
       transpose: currentInterval(),
       pageWidth: Math.round(w * 100 / scale),
       scale: scale, adjustPageHeight: true, breaks: "auto",
       header: "none", footer: "none",
       pageMarginTop: 12, pageMarginBottom: 12, pageMarginLeft: 12, pageMarginRight: 12
     });
-    var ok = tk.loadData(xml);
+    var ok = tk.loadData(data);
     if(!ok){
       errEl.textContent = "Verovio could not load that data. " + (tk.getLog ? tk.getLog() : "");
-      score.innerHTML = '<div class="empty">Load failed. Confirm the file is valid MusicXML or MEI.</div>';
+      score.innerHTML = '<div class="empty">Load failed. Confirm the file is valid MusicXML, MEI, or ABC.</div>';
       btnSvg.disabled = btnPrint.disabled = btnPlay.disabled = true;
       return;
     }
@@ -453,7 +485,94 @@
 
   function esc(s){ return String(s).replace(/[&<>]/g, function(c){ return {"&":"&amp;","<":"&lt;",">":"&gt;"}[c]; }); }
 
-  function loadXML(xml){ rawXML = xml; srcUserSet = false; applyDetection(); draw(); }
+  function loadXML(xml){ inputKind = "xml"; abcRaw = null; rawXML = xml; srcUserSet = false; applyDetection(); draw(); }
+
+  function loadABC(abc, meta){
+    inputKind = "abc"; abcRaw = abc; rawXML = null; srcUserSet = false;
+    srcSel.value = "C"; // tunes from the open libraries are in concert pitch
+    var nm = meta && meta.name ? meta.name : "tune";
+    var ty = meta && meta.type ? meta.type : "";
+    detectEl.innerHTML = "Fetched tune: <b>" + esc(nm) + "</b>" +
+      (ty ? ' <span class="tag">' + esc(ty) + "</span>" : "") +
+      ' <span class="tag">concert pitch</span>';
+    detectEl.hidden = false;
+    draw();
+  }
+
+  // ---------- Fetch by URL + open-library search ----------
+  var resultsEl = document.getElementById("results");
+
+  function fetchUrl(url){
+    if(!url){ errEl.textContent = "Paste a file link first."; return; }
+    errEl.textContent = "Fetching…";
+    fetch(url).then(function(r){
+      if(!r.ok){ throw new Error("HTTP " + r.status); }
+      return r.arrayBuffer();
+    }).then(function(buf){
+      var bytes = new Uint8Array(buf);
+      if(bytes.length > 1 && bytes[0] === 0x50 && bytes[1] === 0x4B){ // "PK" = zip = .mxl
+        loadXML(readMxl(buf));
+      } else {
+        loadXML(new TextDecoder().decode(bytes));
+      }
+      errEl.textContent = "";
+    }).catch(function(e){
+      errEl.textContent = "Could not fetch that link: " + e.message +
+        ". The site may block cross-origin requests — a raw GitHub link usually works.";
+    });
+  }
+
+  function searchTunes(q){
+    if(!q){ errEl.textContent = "Type a tune name to search."; return; }
+    resultsEl.hidden = false;
+    resultsEl.innerHTML = '<p class="muted">Searching thesession.org…</p>';
+    fetch("https://thesession.org/tunes/search?q=" + encodeURIComponent(q) + "&format=json")
+      .then(function(r){ return r.json(); })
+      .then(function(d){
+        var tunes = (d && d.tunes) || [];
+        if(!tunes.length){
+          resultsEl.innerHTML = '<p class="muted">No tunes found on thesession.org (traditional/folk only, not pop).</p>';
+          return;
+        }
+        var html = "";
+        tunes.slice(0, 12).forEach(function(t){
+          html += '<button class="result" type="button" data-id="' + t.id + '"><b>' +
+            esc(t.name) + "</b>" + (t.type ? " <span>" + esc(t.type) + "</span>" : "") + "</button>";
+        });
+        resultsEl.innerHTML = html;
+      })
+      .catch(function(e){ resultsEl.innerHTML = '<p class="muted">Search failed: ' + esc(e.message) + "</p>"; });
+  }
+
+  function loadTune(id){
+    errEl.textContent = "Loading tune…";
+    fetch("https://thesession.org/tunes/" + id + "?format=json")
+      .then(function(r){ return r.json(); })
+      .then(function(d){
+        var s = d && d.settings && d.settings[0];
+        if(!s || !s.abc){ throw new Error("tune has no notation"); }
+        loadABC(buildAbc(d, s), { name: d.name, type: d.type });
+        errEl.textContent = "";
+      })
+      .catch(function(e){ errEl.textContent = "Could not load that tune: " + e.message; });
+  }
+
+  var METER = { reel:"4/4", hornpipe:"4/4", march:"4/4", strathspey:"4/4", barndance:"4/4",
+    jig:"6/8", "slip jig":"9/8", slide:"12/8", polka:"2/4", waltz:"3/4", mazurka:"3/4", three_two:"3/2" };
+
+  function normalizeAbcKey(k){
+    return String(k || "C")
+      .replace(/major/i, "").replace(/minor/i, "min").replace(/dorian/i, "dor")
+      .replace(/mixolydian/i, "mix").replace(/aeolian/i, "m").replace(/phrygian/i, "phr")
+      .replace(/lydian/i, "lyd").replace(/locrian/i, "loc").trim() || "C";
+  }
+
+  function buildAbc(d, s){
+    var meter = METER[d.type] || "4/4";
+    var body = String(s.abc || "").replace(/!/g, "\n");
+    return "X:1\nT:" + (d.name || "Tune") + "\n" + (d.type ? "R:" + d.type + "\n" : "") +
+      "M:" + meter + "\nL:1/8\nK:" + normalizeAbcKey(s.key) + "\n" + body + "\n";
+  }
 
   function setMode(m){
     mode = m;
@@ -570,28 +689,55 @@
     btnStop.disabled = true; btnPlay.textContent = "Play";
   }
 
-  function play(){
+  function play(){ if(inputKind === "abc"){ playAbc(); } else { playXml(); } }
+
+  function playXml(){
     var data;
     try{
       var xml = displayXML(); if(!xml){ return; }
-      data = parseMelodyNotes(xml);
+      var raw = parseMelodyNotes(xml);
+      var shift = soundSel.value === "written" ? altoSemis() : 0; // concert = sounding pitch
+      data = { tempo: raw.tempo, notes: raw.notes.map(function(n){
+        return { midi: n.midi + shift, start: n.start, dur: n.dur }; }) };
     }catch(e){ audioFail("Could not read the notes to play.", e); return; }
     if(!data.notes.length){ errEl.textContent = "No playable melody notes found in this part."; return; }
+    startAudio(data);
+  }
 
+  // Tunes are rendered by Verovio from ABC; take playback notes from its MIDI export
+  // (Verovio has already applied key signature, durations, and the display transpose).
+  function playAbc(){
+    var data;
+    try{
+      if(!tk || !abcRaw){ return; }
+      var b64 = tk.renderToMIDI();
+      if(!b64){ audioFail("Could not generate audio for this tune.", null); return; }
+      var smf = parseSMF(b64ToBytes(b64));
+      if(!smf.notes.length){ errEl.textContent = "No playable notes found in this tune."; return; }
+      // MIDI pitches carry the display transpose; recover concert, then add the
+      // written shift when the user asked for the "written" sound.
+      var disp = (mode === "alto") ? altoSemis() : 0;
+      var add = -disp + (soundSel.value === "written" ? altoSemis() : 0);
+      data = { tempo: smf.tempo, notes: smf.notes.map(function(n){
+        return { midi: n.midi + add, start: n.start, dur: n.dur }; }) };
+    }catch(e){ audioFail("Tune playback failed.", e); return; }
+    if(!data.notes.length){ errEl.textContent = "No playable notes found in this tune."; return; }
+    startAudio(data);
+  }
+
+  function startAudio(data){
     try{ actx = actx || new (window.AudioContext || window.webkitAudioContext)(); }
     catch(e){ audioFail("Web Audio is not available in this browser.", e); return; }
     stopPlayback();
     errEl.textContent = "";
-    try{ console.log("[sax audio] state=" + actx.state + " sampleRate=" + actx.sampleRate +
+    try{ console.log("[sax audio] kind=" + inputKind + " state=" + actx.state +
       " notes=" + data.notes.length + " tempo=" + data.tempo); }catch(_){}
-
     // resume() is async and, on some browsers, only settles after the click's
     // microtask. Try the promise, but also schedule on a short fallback timer so a
     // resume that never resolves can't leave us silent. go() is idempotent-guarded.
     var started = false;
     var go = function(){
       if(started) return; started = true;
-      // Prefer recorded samples; fall back to the synth if they won't load.
       ensureSax().then(
         function(inst){ schedule(data, inst); },
         function(e){ try{ console.warn("[sax audio] samples unavailable, using synth", e); }catch(_){}
@@ -606,11 +752,11 @@
     }
   }
 
+  // data.notes already carry final sounding MIDI pitches.
   function schedule(data, inst){
     try{
       var useSamples = !!inst;
-      var shift = soundSel.value === "written" ? altoSemis() : 0; // concert = sounding pitch
-      var spb = 60 / (data.tempo || 72);                          // seconds per quarter beat
+      var spb = 60 / (data.tempo || 72); // seconds per quarter beat
       if(!isFinite(spb) || spb <= 0){ spb = 60/72; }
       var master = null;
       if(!useSamples){
@@ -622,7 +768,7 @@
         var nte = data.notes[i];
         var st = t0 + nte.start * spb;
         var du = Math.max(0.08, nte.dur * spb);
-        var midi = nte.midi + shift;
+        var midi = nte.midi;
         if(useSamples){
           if(midi >= 0 && midi <= 127){ inst.play(midi, st, { duration: du, gain: 2.6 }); voiced++; }
         } else {
@@ -635,6 +781,63 @@
       btnStop.disabled = false; btnPlay.textContent = useSamples ? "Playing…" : "Playing (synth)…";
       playTimer = setTimeout(stopPlayback, (total + 0.6) * 1000);
     }catch(e){ audioFail("Playback failed while scheduling notes.", e); }
+  }
+
+  // ---------- Standard MIDI File parsing (for ABC playback via Verovio) ----------
+  function b64ToBytes(b64){
+    var bin = atob(b64), len = bin.length, bytes = new Uint8Array(len);
+    for(var i=0;i<len;i++){ bytes[i] = bin.charCodeAt(i); }
+    return bytes;
+  }
+
+  function parseSMF(bytes){
+    var pos = 0;
+    function u32(){ return (bytes[pos++]<<24 | bytes[pos++]<<16 | bytes[pos++]<<8 | bytes[pos++]) >>> 0; }
+    function u16(){ return bytes[pos++]<<8 | bytes[pos++]; }
+    function vlq(){ var v=0,c; do{ c=bytes[pos++]; v=(v<<7)|(c&0x7f); }while(c&0x80); return v; }
+    function tag(){ return String.fromCharCode(bytes[pos],bytes[pos+1],bytes[pos+2],bytes[pos+3]); }
+
+    if(tag() !== "MThd"){ return { tempo:120, notes:[] }; }
+    pos += 4; u32();            // "MThd", header length
+    u16();                       // format
+    var ntracks = u16();
+    var division = u16();        // ticks per quarter (assume positive)
+    if(!division){ division = 480; }
+
+    var tempo = 120, notes = [];
+    for(var tr=0; tr<ntracks; tr++){
+      if(pos+8 > bytes.length) break;
+      if(tag() !== "MTrk"){ break; }
+      pos += 4;
+      var len = u32(), end = pos + len, ticks = 0, status = 0, open = {};
+      while(pos < end){
+        ticks += vlq();
+        var b = bytes[pos];
+        if(b & 0x80){ status = b; pos++; } // new status, else running status reuses `status`
+        var ev = status & 0xf0;
+        if(status === 0xff){            // meta
+          var type = bytes[pos++], mlen = vlq();
+          if(type === 0x51 && mlen === 3){ tempo = 60000000 / ((bytes[pos]<<16)|(bytes[pos+1]<<8)|bytes[pos+2]); }
+          pos += mlen;
+        } else if(status === 0xf0 || status === 0xf7){ // sysex
+          var slen = vlq(); pos += slen;
+        } else if(ev === 0x90 || ev === 0x80){ // note on / off
+          var note = bytes[pos++], vel = bytes[pos++];
+          if(ev === 0x90 && vel > 0){ (open[note] || (open[note] = [])).push(ticks); }
+          else {
+            var starts = open[note];
+            if(starts && starts.length){
+              var s = starts.shift();
+              notes.push({ midi:note, start:s/division, dur:Math.max(0.05,(ticks-s)/division) });
+            }
+          }
+        } else if(ev === 0xc0 || ev === 0xd0){ pos += 1; } // program / channel pressure
+        else { pos += 2; }               // 2-byte channel messages
+      }
+      pos = end;
+    }
+    notes.sort(function(a,b){ return a.start - b.start; });
+    return { tempo: tempo, notes: notes, divisions: division };
   }
 
   function boot(){
@@ -660,6 +863,15 @@
     var v = document.getElementById("paste").value.trim();
     if(!v){ errEl.textContent = "Paste some MusicXML first."; return; }
     loadXML(v);
+  });
+  var urlEl = document.getElementById("url"), qEl = document.getElementById("q");
+  document.getElementById("url-load").addEventListener("click", function(){ if(tk) fetchUrl(urlEl.value.trim()); });
+  urlEl.addEventListener("keydown", function(e){ if(e.key === "Enter"){ e.preventDefault(); if(tk) fetchUrl(urlEl.value.trim()); } });
+  document.getElementById("search").addEventListener("click", function(){ searchTunes(qEl.value.trim()); });
+  qEl.addEventListener("keydown", function(e){ if(e.key === "Enter"){ e.preventDefault(); searchTunes(qEl.value.trim()); } });
+  resultsEl.addEventListener("click", function(e){
+    var b = e.target.closest ? e.target.closest(".result") : null;
+    if(b && tk){ loadTune(b.getAttribute("data-id")); }
   });
   document.getElementById("file").addEventListener("change", function(e){
     var f = e.target.files && e.target.files[0]; if(!f) return;

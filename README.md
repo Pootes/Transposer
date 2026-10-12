@@ -32,6 +32,21 @@ Then change the `<script src>` line in `index.html` to `vendor/verovio-toolkit-w
 (and in `index-osmd.html` to `vendor/opensheetmusicdisplay.min.js`). The Verovio
 `.wasm` is resolved next to its JS, so keep both in `vendor/`.
 
+## Getting music in by name or link
+
+Two ways to load without exporting a file yourself:
+
+- **Fetch link** downloads a MusicXML / MEI / `.mxl` from a URL and runs it through the
+  normal pipeline. It only works when the host sends CORS headers; raw GitHub file links
+  (`raw.githubusercontent.com/...`) are the reliable case.
+- **Search** queries [thesession.org](https://thesession.org), an open library of
+  traditional / folk tunes (CC-licensed ABC). A result is fetched as ABC, rendered and
+  transposed natively by Verovio, and played back from Verovio's MIDI export.
+
+There is **no** free, legal way to fetch arbitrary copyrighted pop songs by name; no open
+API serves their MusicXML, and scraping score sites breaks their terms. For those, export
+MusicXML from a notation app and load the file.
+
 ## Source detection
 
 On load, the tool inspects the file's first part and sets the source dropdown
