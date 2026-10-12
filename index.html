@@ -9,7 +9,7 @@
 <!--
   Engraving: Verovio (WASM). OFFLINE: run vendor/setup.sh, point src at vendor/verovio-toolkit-wasm.js
 -->
-<script src="https://www.verovio.org/javascript/latest/verovio-toolkit-wasm.js"></script>
+<script src="https://www.verovio.org/javascript/4.3.1/verovio-toolkit-wasm.js"></script>
 <!-- fflate: unpacks compressed MusicXML (.mxl) in-browser. Offline: vendor/fflate.min.js -->
 <script src="https://cdnjs.cloudflare.com/ajax/libs/fflate/0.8.2/umd/index.min.js"></script>
 <!-- soundfont-player: streams recorded alto-sax samples for realistic playback.
@@ -189,6 +189,7 @@
       <h2>Input</h2>
       <div class="rowbtns">
         <button class="btn" id="sample" type="button">Load sample</button>
+        <button class="btn" id="sample-vn" type="button">Vietnamese folk tune</button>
         <button class="btn" id="paste-load" type="button">Render pasted XML</button>
         <button class="btn" id="svg" type="button" disabled>Download SVG</button>
         <button class="btn primary" id="print" type="button" disabled>Print / Save PDF</button>
@@ -201,7 +202,7 @@
 
   <div class="notes">
     <h3>Getting music by name or link</h3>
-    <p><b>Fetch link</b> pulls a MusicXML/MEI/<code>.mxl</code> file straight from a URL, as long as that host allows cross-origin requests &mdash; raw GitHub file links are the dependable case. <b>Search</b> queries <a href="https://thesession.org" target="_blank" rel="noopener">thesession.org</a>, an open library of traditional and folk tunes; pick a result and it loads, transposes, and plays like any other input. There is no free, legal way to fetch copyrighted pop songs by name, so those are not searchable &mdash; export them from a notation app and load the file.</p>
+    <p><b>Fetch link</b> pulls a MusicXML/MEI/<code>.mxl</code> file straight from a URL, as long as that host allows cross-origin requests &mdash; raw GitHub file links are the dependable case. <b>Search</b> queries <a href="https://thesession.org" target="_blank" rel="noopener">thesession.org</a>, an open library of traditional and folk tunes; pick a result and it loads, transposes, and plays like any other input. There is no free, legal way to fetch copyrighted pop songs by name &mdash; Vietnamese or otherwise &mdash; so those are not searchable; export them from a notation app (or your own files) and load them here. The <b>Vietnamese folk tune</b> button loads a traditional, public-domain melody (<i>Kìa Con Bướm Vàng</i>) with its lyrics as a starting point.</p>
     <h3>Source detection</h3>
     <p>On load, the tool reads the file's first part &mdash; its instrument name, General MIDI program, and any written-pitch <code>transpose</code> &mdash; and sets <b>Source part is written for</b> automatically (concert, B&flat;, F, or E&flat;). It also flags grand-staff piano files, where <b>Melody only</b> is the right choice. It is a best guess from the file's metadata; change the dropdown yourself and it stays on your choice.</p>
     <h3>Melody extraction</h3>
@@ -261,6 +262,39 @@
     '<note><pitch><step>C</step><octave>5</octave></pitch><duration>1</duration><type>quarter</type></note></measure>',
     '</part></score-partwise>'
   ].join("");
+
+  // A traditional, public-domain Vietnamese folk melody: "Kìa Con Bướm Vàng" (sung to
+  // the Frère Jacques tune). Copyrighted Vietnamese pop cannot be bundled or fetched
+  // legally; load those from your own exported files via the Input section.
+  var VN_SAMPLE = (function(){
+    var D = 2; // divisions per quarter note
+    function n(step, oct, beats, lyric){
+      var dur = Math.round(beats * D);
+      var type = beats === 0.5 ? "eighth" : beats === 2 ? "half" : "quarter";
+      var ly = lyric ? "<lyric><syllabic>single</syllabic><text>" + lyric + "</text></lyric>" : "";
+      return "<note><pitch><step>" + step + "</step><octave>" + oct + "</octave></pitch>" +
+             "<duration>" + dur + "</duration><type>" + type + "</type>" + ly + "</note>";
+    }
+    var meas = [
+      n("C",4,1,"Kìa") + n("D",4,1,"con") + n("E",4,1,"bướm") + n("C",4,1,"vàng"),
+      n("C",4,1,"kìa") + n("D",4,1,"con") + n("E",4,1,"bướm") + n("C",4,1,"vàng"),
+      n("E",4,1,"xòe") + n("F",4,1,"đôi") + n("G",4,2,"cánh"),
+      n("E",4,1,"xòe") + n("F",4,1,"đôi") + n("G",4,2,"cánh"),
+      n("G",4,0.5,"tung") + n("A",4,0.5,"cánh") + n("G",4,0.5,"bay") + n("F",4,0.5,"năm") + n("E",4,1,"ba") + n("C",4,1,"vòng"),
+      n("G",4,0.5,"tung") + n("A",4,0.5,"cánh") + n("G",4,0.5,"bay") + n("F",4,0.5,"năm") + n("E",4,1,"ba") + n("C",4,1,"vòng"),
+      n("C",4,1,"em") + n("G",3,1,"ngồi") + n("C",4,2,"xem"),
+      n("C",4,1,"em") + n("G",3,1,"ngồi") + n("C",4,2,"xem")
+    ];
+    var body = "";
+    for(var i=0;i<meas.length;i++){
+      var attrs = i === 0 ? "<attributes><divisions>" + D + "</divisions><key><fifths>0</fifths></key>" +
+        "<time><beats>4</beats><beat-type>4</beat-type></time><clef><sign>G</sign><line>2</line></clef></attributes>" : "";
+      body += '<measure number="' + (i+1) + '">' + attrs + meas[i] + "</measure>";
+    }
+    return '<?xml version="1.0" encoding="UTF-8"?><score-partwise version="3.1"><part-list>' +
+      '<score-part id="P1"><part-name>Kìa Con Bướm Vàng</part-name></score-part></part-list>' +
+      '<part id="P1">' + body + "</part></score-partwise>";
+  })();
 
   function pitchToMidi(pitchEl){
     if(!pitchEl) return null;
@@ -841,12 +875,23 @@
   }
 
   function boot(){
+    if(tk){ return; } // already booted (guards the watchdog + double callbacks)
     try { tk = new verovio.toolkit(); }
     catch(e){ errEl.textContent = "Verovio failed to initialise: " + e.message; return; }
     score.innerHTML = '<div class="empty">Engine ready. <b>Load sample</b> or a MusicXML / .mxl file below.</div>';
   }
+  // Robust init across Verovio builds: the Emscripten module may already be running
+  // (older builds expose calledRun; newer ones dropped it), or still starting. Try the
+  // ready flags, hook onRuntimeInitialized, and keep a watchdog so a missed callback
+  // can't leave the engine stuck on "loading" forever.
   if(window.verovio && verovio.module){
-    if(verovio.module.calledRun){ boot(); } else { verovio.module.onRuntimeInitialized = boot; }
+    var m = verovio.module;
+    if(m.calledRun === true || m.asm || m.wasmExports){ try{ boot(); }catch(e){} }
+    if(!tk){
+      var prev = m.onRuntimeInitialized;
+      m.onRuntimeInitialized = function(){ if(typeof prev === "function"){ try{ prev(); }catch(e){} } boot(); };
+      setTimeout(function(){ if(!tk){ boot(); } }, 3500);
+    }
   } else {
     errEl.textContent = "Verovio script did not load. If self-hosting, run vendor/setup.sh and check the path. Otherwise check your connection.";
   }
@@ -859,6 +904,7 @@
   btnPlay.addEventListener("click", play);
   btnStop.addEventListener("click", stopPlayback);
   document.getElementById("sample").addEventListener("click", function(){ if(tk) loadXML(SAMPLE); });
+  document.getElementById("sample-vn").addEventListener("click", function(){ if(tk) loadXML(VN_SAMPLE); });
   document.getElementById("paste-load").addEventListener("click", function(){
     var v = document.getElementById("paste").value.trim();
     if(!v){ errEl.textContent = "Paste some MusicXML first."; return; }
@@ -875,15 +921,21 @@
   });
   document.getElementById("file").addEventListener("change", function(e){
     var f = e.target.files && e.target.files[0]; if(!f) return;
+    // Always read bytes and auto-detect a zip (.mxl) by its "PK" signature, so a
+    // compressed file loads whatever its extension says.
     var r = new FileReader();
     r.onerror = function(){ errEl.textContent = "Could not read that file."; };
-    if(/\.mxl$/i.test(f.name)){
-      r.onload = function(){ try { loadXML(readMxl(r.result)); } catch(err){ errEl.textContent = "Could not unpack that .mxl: " + err.message; } };
-      r.readAsArrayBuffer(f);
-    } else {
-      r.onload = function(){ loadXML(String(r.result)); };
-      r.readAsText(f);
-    }
+    r.onload = function(){
+      try{
+        var bytes = new Uint8Array(r.result);
+        if(bytes.length > 1 && bytes[0] === 0x50 && bytes[1] === 0x4B){ // "PK" = zip = .mxl
+          loadXML(readMxl(r.result));
+        } else {
+          loadXML(new TextDecoder().decode(bytes));
+        }
+      }catch(err){ errEl.textContent = "Could not read that file: " + err.message; }
+    };
+    r.readAsArrayBuffer(f);
   });
   document.getElementById("svg").addEventListener("click", function(){
     var svg = score.querySelector("svg"); if(!svg){ return; }

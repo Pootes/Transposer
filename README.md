@@ -43,9 +43,14 @@ Two ways to load without exporting a file yourself:
   traditional / folk tunes (CC-licensed ABC). A result is fetched as ABC, rendered and
   transposed natively by Verovio, and played back from Verovio's MIDI export.
 
-There is **no** free, legal way to fetch arbitrary copyrighted pop songs by name; no open
-API serves their MusicXML, and scraping score sites breaks their terms. For those, export
-MusicXML from a notation app and load the file.
+There is **no** free, legal way to fetch arbitrary copyrighted pop songs by name &mdash;
+Vietnamese or otherwise; no open API serves their MusicXML, and scraping score sites breaks
+their terms. For those, export MusicXML from a notation app and load the file. The
+**Vietnamese folk tune** button loads a traditional, public-domain melody (*Kìa Con Bướm
+Vàng*, sung to the Frère Jacques tune) with Vietnamese lyrics as a built-in example.
+
+Verovio is pinned to a fixed version (`4.3.1`) rather than `latest`, because the rolling
+`latest` build changed its startup API and left the engine stuck on "loading".
 
 ## Source detection
 
