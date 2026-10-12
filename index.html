@@ -65,6 +65,16 @@
   .playbar .pbtn.stop{background:var(--surface);color:var(--fg);border-color:var(--line)}
   .playbar .pbtn:disabled{opacity:.5;cursor:not-allowed}
   .playbar .meta{font-size:.78rem;color:var(--muted);min-width:0;flex:1 1 180px}
+  .playbar.loopbar{margin-top:8px}
+  .transport{display:flex;align-items:center;gap:8px;flex:1 1 220px;min-width:0}
+  .transport input[type=range]{flex:1 1 120px;min-width:80px;accent-color:var(--accent);cursor:pointer}
+  .transport input[type=range]:disabled{cursor:not-allowed;opacity:.5}
+  .time{font-size:.76rem;color:var(--muted);font-variant-numeric:tabular-nums;white-space:nowrap}
+  .mini{font:inherit;font-size:.76rem;cursor:pointer;border-radius:7px;border:1px solid var(--line);background:var(--surface);color:var(--fg);padding:4px 9px}
+  .mini:hover:not(:disabled){border-color:var(--accent)}
+  .mini:disabled{opacity:.5;cursor:not-allowed}
+  .loopchk{display:inline-flex;align-items:center;gap:5px;font-size:.78rem;color:var(--muted);cursor:pointer}
+  .paper .vrv-playing,.paper .vrv-playing *{fill:var(--accent) !important;stroke:var(--accent) !important}
   .playbar .inl{display:flex;align-items:center;gap:7px;font-size:.8rem;color:var(--muted)}
   .playbar select{width:auto;padding:6px 9px;font-size:.82rem}
   .paper{margin-top:16px;background:var(--paper);border:1px solid var(--line);border-radius:var(--radius);padding:14px 16px;min-height:170px;overflow-x:auto;box-shadow:0 1px 3px rgba(0,0,0,.14)}
@@ -159,13 +169,26 @@
   <div class="playbar">
     <button class="pbtn" id="play" type="button" disabled>Play</button>
     <button class="pbtn stop" id="stop" type="button" disabled>Stop</button>
+    <span class="transport">
+      <input type="range" id="seek" min="0" max="1000" value="0" step="1" disabled aria-label="Seek">
+      <span class="time" id="time">0:00 / 0:00</span>
+    </span>
     <span class="inl">Sound
       <select id="sound">
         <option value="concert" selected>Concert (how it really sounds)</option>
         <option value="written">Written (noteheads at face value)</option>
       </select>
     </span>
-    <span class="meta" id="playmeta">Recorded alto-sax samples (falls back to a synth tone offline).</span>
+  </div>
+  <div class="playbar loopbar">
+    <span class="inl">Section loop
+      <button class="mini" id="setA" type="button" disabled>Set A</button>
+      <button class="mini" id="setB" type="button" disabled>Set B</button>
+      <button class="mini" id="loopClear" type="button" disabled>Clear</button>
+      <label class="loopchk"><input type="checkbox" id="loopOn" disabled> Loop A&ndash;B</label>
+      <span class="time" id="abinfo">A&ndash;B not set</span>
+    </span>
+    <span class="meta" id="playmeta">Recorded alto-sax samples (synth fallback offline). Click a note to jump there.</span>
   </div>
 
   <div class="paper"><div id="score"><div class="empty">Engine loading. When ready, <b>Load sample</b> or a MusicXML / .mxl file below.</div></div></div>
@@ -211,6 +234,7 @@
     <p><b>Melody only</b> keeps the top staff of a piano or multi-staff score, drops the accompaniment and bass clef, reduces any chords to the top (melody) note, keeps the lyrics, and labels the part Alto Sax, which is what a single-line sax part should be. Switch to <b>Full score</b> to render the source untouched.</p>
     <h3>Playback</h3>
     <p>Playback uses <b>recorded alto-sax samples</b> (the MusyngKite soundfont), streamed the first time you press Play, so it sounds like a real horn rather than a synth. With no connection it falls back to a built-in synthesized tone. <b>Concert</b> plays what a real alto actually produces reading this part (the song's true pitch); <b>Written</b> sounds the noteheads at face value, a major sixth higher, for verifying what is on the page.</p>
+    <p>The note being played is <b>highlighted on the staff</b> as it sounds. <b>Play</b> toggles play/pause, <b>Stop</b> returns to the start, the <b>seek bar</b> scrubs anywhere, and <b>clicking a note</b> jumps playback to it. To drill a passage, press <b>Set A</b> and <b>Set B</b> at the two points (or drag the seek bar there first) and tick <b>Loop A&ndash;B</b> to repeat just that section.</p>
     <h3>Getting music in</h3>
     <p>Export MusicXML (<code>.musicxml</code>, <code>.xml</code>, or <code>.mxl</code>) from any notation app; <code>.mxl</code> is unpacked in the browser. For a scanned PDF, use the Audiveris workflow in <code>omr/</code> first.</p>
   </div>
@@ -419,7 +443,8 @@
     var pages = tk.getPageCount(), svg = "";
     for(var p=1; p<=pages; p++){ svg += tk.renderToSVG(p); }
     score.innerHTML = svg;
-    btnSvg.disabled = btnPrint.disabled = btnPlay.disabled = false;
+    btnSvg.disabled = btnPrint.disabled = false;
+    prepareTransport();
   }
 
   // ---------- Source-instrument detection ----------
@@ -636,6 +661,18 @@
   var actx = null, nodes = [], playTimer = null;
   var sfInst = null, sfLoad = null;  // sampled instrument + its loader promise
 
+  // Transport: one timeline shared by audio and the on-screen note highlight.
+  var tp = { events:[], tempo:120, totalSec:0, audioStart:0, offsetSec:0, playing:false,
+             raf:0, loopA:null, loopB:null, loop:false, hi:{} };
+  var seeking = false;
+  var seekEl = document.getElementById("seek");
+  var timeEl = document.getElementById("time");
+  var setAEl = document.getElementById("setA");
+  var setBEl = document.getElementById("setB");
+  var loopClearEl = document.getElementById("loopClear");
+  var loopOnEl = document.getElementById("loopOn");
+  var abinfoEl = document.getElementById("abinfo");
+
   // Fetch the alto-sax sample set once, cache it. Resolves to the instrument,
   // or rejects (offline / library blocked) so playback can fall back to synth.
   function ensureSax(){
@@ -648,41 +685,6 @@
     sfLoad = Soundfont.instrument(actx, "alto_sax", { soundfont: "MusyngKite" })
       .then(function(inst){ sfInst = inst; return inst; });
     return sfLoad;
-  }
-
-  function parseMelodyNotes(xmlText){
-    var doc = new DOMParser().parseFromString(xmlText, "application/xml");
-    if(doc.getElementsByTagName("parsererror").length){ return { tempo:72, notes:[] }; }
-    var divEl = doc.getElementsByTagName("divisions")[0];
-    var divisions = divEl ? parseInt(divEl.textContent,10) : 1;
-    var tempo = 72;
-    var snd = doc.querySelector("sound[tempo]");
-    if(snd){ tempo = parseFloat(snd.getAttribute("tempo")) || 72; }
-    else { var pm = doc.getElementsByTagName("per-minute")[0]; if(pm){ tempo = parseFloat(pm.textContent) || 72; } }
-
-    var out = [], t = 0, measures = doc.getElementsByTagName("measure"), i, j;
-    for(i=0;i<measures.length;i++){
-      var kids = measures[i].childNodes;
-      for(j=0;j<kids.length;j++){
-        var el = kids[j];
-        if(el.nodeType !== 1) continue;
-        if(el.tagName === "note"){
-          if(el.getElementsByTagName("chord")[0]) continue; // melody already monophonic
-          var durEl = el.getElementsByTagName("duration")[0];
-          var dur = durEl ? parseInt(durEl.textContent,10)/divisions : 0; // quarter-note beats
-          var midi = pitchToMidi(el.getElementsByTagName("pitch")[0]);
-          if(midi !== null){ out.push({ midi:midi, start:t, dur:dur }); }
-          t += dur;
-        } else if(el.tagName === "backup"){
-          var d = el.getElementsByTagName("duration")[0];
-          if(d){ t -= parseInt(d.textContent,10)/divisions; }
-        } else if(el.tagName === "forward"){
-          var f = el.getElementsByTagName("duration")[0];
-          if(f){ t += parseInt(f.textContent,10)/divisions; }
-        }
-      }
-    }
-    return { tempo:tempo, notes:out, divisions:divisions };
   }
 
   function midiToFreq(m){ return 440 * Math.pow(2, (m-69)/12); }
@@ -710,114 +712,194 @@
     nodes.push(osc);
   }
 
-  function stopPlayback(){
-    if(playTimer){ clearTimeout(playTimer); playTimer = null; }
+  function stopAudioNodes(){
     if(sfInst){ try{ sfInst.stop(); }catch(e){} }  // cancel sampled notes
     for(var i=0;i<nodes.length;i++){ try{ nodes[i].stop(); }catch(e){} }
     nodes = [];
-    btnStop.disabled = true;
-    btnPlay.textContent = "Play";
+  }
+  function haltAudio(){ tp.playing = false; cancelAnimationFrame(tp.raf); stopAudioNodes(); }
+
+  // Full reset (Stop button, and the start of each draw()).
+  function stopPlayback(){
+    haltAudio();
+    tp.offsetSec = 0;
+    clearHighlights();
+    updateTimeUI(0);
+    if(btnStop) btnStop.disabled = true;
+    if(btnPlay) btnPlay.textContent = "Play";
   }
 
   function audioFail(msg, e){
     try{ console.error("[sax audio] " + msg, e || ""); }catch(_){}
     errEl.textContent = msg + (e && e.message ? " (" + e.message + ")" : "");
-    btnStop.disabled = true; btnPlay.textContent = "Play";
+    haltAudio();
+    if(btnStop) btnStop.disabled = true; if(btnPlay) btnPlay.textContent = "Play";
   }
 
-  function play(){ if(inputKind === "abc"){ playAbc(); } else { playXml(); } }
+  function fmtTime(sec){
+    sec = Math.max(0, Math.round(sec || 0));
+    var m = Math.floor(sec/60), s = sec % 60;
+    return m + ":" + (s<10 ? "0" : "") + s;
+  }
+  function updateTimeUI(posSec){
+    if(timeEl){ timeEl.textContent = fmtTime(posSec) + " / " + fmtTime(tp.totalSec); }
+    if(seekEl && !seeking){ seekEl.value = tp.totalSec>0 ? Math.round(Math.min(posSec,tp.totalSec)/tp.totalSec*1000) : 0; }
+  }
+  function updateAbInfo(){
+    if(!abinfoEl) return;
+    if(tp.loopA==null && tp.loopB==null){ abinfoEl.textContent = "A–B not set"; return; }
+    abinfoEl.textContent = "A " + (tp.loopA!=null?fmtTime(tp.loopA):"–") + " · B " + (tp.loopB!=null?fmtTime(tp.loopB):"–");
+  }
 
-  function playXml(){
-    var data;
+  function clearHighlights(){
+    for(var id in tp.hi){ var el=document.getElementById(id); if(el){ el.classList.remove("vrv-playing"); } }
+    tp.hi = {};
+  }
+  function highlightAt(ms){
+    var ids = {}, id, el;
     try{
-      var xml = displayXML(); if(!xml){ return; }
-      var raw = parseMelodyNotes(xml);
-      var shift = soundSel.value === "written" ? altoSemis() : 0; // concert = sounding pitch
-      data = { tempo: raw.tempo, notes: raw.notes.map(function(n){
-        return { midi: n.midi + shift, start: n.start, dur: n.dur }; }) };
-    }catch(e){ audioFail("Could not read the notes to play.", e); return; }
-    if(!data.notes.length){ errEl.textContent = "No playable melody notes found in this part."; return; }
-    startAudio(data);
+      var r = tk.getElementsAtTime(Math.max(0, Math.round(ms)));
+      if(typeof r === "string"){ r = JSON.parse(r); }        // some builds return a JSON string
+      var arr = Array.isArray(r) ? r : (r && r.notes) || [];  // or {notes:[...]}, or a bare array
+      for(var i=0;i<arr.length;i++){ ids[arr[i]] = 1; }
+    }catch(e){}
+    for(id in tp.hi){ if(!ids[id]){ el=document.getElementById(id); if(el) el.classList.remove("vrv-playing"); delete tp.hi[id]; } }
+    var first=null;
+    for(id in ids){ if(!tp.hi[id]){ el=document.getElementById(id); if(el){ el.classList.add("vrv-playing"); if(!first) first=el; } tp.hi[id]=1; } }
+    if(first) scrollNoteIntoView(first);
   }
-
-  // Tunes are rendered by Verovio from ABC; take playback notes from its MIDI export
-  // (Verovio has already applied key signature, durations, and the display transpose).
-  function playAbc(){
-    var data;
+  function scrollNoteIntoView(el){
     try{
-      if(!tk || !abcRaw){ return; }
-      var b64 = tk.renderToMIDI();
-      if(!b64){ audioFail("Could not generate audio for this tune.", null); return; }
-      var smf = parseSMF(b64ToBytes(b64));
-      if(!smf.notes.length){ errEl.textContent = "No playable notes found in this tune."; return; }
-      // MIDI pitches carry the display transpose; recover concert, then add the
-      // written shift when the user asked for the "written" sound.
-      var disp = (mode === "alto") ? altoSemis() : 0;
-      var add = -disp + (soundSel.value === "written" ? altoSemis() : 0);
-      data = { tempo: smf.tempo, notes: smf.notes.map(function(n){
-        return { midi: n.midi + add, start: n.start, dur: n.dur }; }) };
-    }catch(e){ audioFail("Tune playback failed.", e); return; }
-    if(!data.notes.length){ errEl.textContent = "No playable notes found in this tune."; return; }
-    startAudio(data);
+      var paper = score.parentNode, r = el.getBoundingClientRect(), pr = paper.getBoundingClientRect();
+      if(r.left < pr.left+12){ paper.scrollLeft += r.left - pr.left - 48; }
+      else if(r.right > pr.right-12){ paper.scrollLeft += r.right - pr.right + 48; }
+    }catch(e){}
   }
 
-  function startAudio(data){
+  // Build note events (stored at CONCERT pitch) + total duration from Verovio's MIDI
+  // export, so audio and the on-screen highlight share one timeline.
+  function buildEvents(){
+    if(!tk) return null;
+    var b64; try{ b64 = tk.renderToMIDI(); }catch(e){ return null; }
+    if(!b64) return null;
+    var smf = parseSMF(b64ToBytes(b64));
+    if(!smf.notes.length) return null;
+    var spb = 60 / (smf.tempo || 120);
+    var disp = (mode === "alto") ? altoSemis() : 0; // display transpose baked into the MIDI
+    var notes = [], total = 0;
+    for(var i=0;i<smf.notes.length;i++){
+      var n = smf.notes[i];
+      var startSec = n.start * spb, durSec = Math.max(0.08, n.dur * spb);
+      notes.push({ midi: n.midi - disp, startSec: startSec, durSec: durSec }); // concert pitch
+      if(startSec + durSec > total){ total = startSec + durSec; }
+    }
+    return { notes: notes, totalSec: total, tempo: smf.tempo };
+  }
+
+  // Rebuild the transport whenever the rendered score changes.
+  function prepareTransport(){
+    stopPlayback();
+    tp.loopA = tp.loopB = null; tp.loop = false; if(loopOnEl){ loopOnEl.checked = false; }
+    var e = buildEvents();
+    tp.events = e ? e.notes : [];
+    tp.totalSec = e ? e.totalSec : 0;
+    tp.tempo = e ? e.tempo : 120;
+    var has = tp.events.length > 0;
+    if(seekEl){ seekEl.disabled = !has; seekEl.value = 0; }
+    if(btnPlay){ btnPlay.disabled = !has; }
+    if(setAEl){ setAEl.disabled = !has; }
+    if(setBEl){ setBEl.disabled = !has; }
+    if(loopClearEl){ loopClearEl.disabled = !has; }
+    if(loopOnEl){ loopOnEl.disabled = !has; }
+    updateAbInfo(); updateTimeUI(0);
+  }
+
+  function currentPos(){
+    return tp.playing ? Math.min(tp.offsetSec + (actx.currentTime - tp.audioStart), tp.totalSec) : tp.offsetSec;
+  }
+
+  function scheduleAudioFrom(offsetSec, inst){
+    var useSamples = !!inst, master = null;
+    if(!useSamples){
+      master = actx.createGain(); master.gain.value = 1.0; master.connect(actx.destination);
+      nodes.push({ stop:function(){ try{ master.disconnect(); }catch(e){} } });
+    }
+    var audioStart = actx.currentTime + 0.15; tp.audioStart = audioStart;
+    var endSec = (tp.loop && tp.loopB != null) ? tp.loopB : (tp.totalSec + 0.001);
+    var writtenShift = (soundSel.value === "written") ? altoSemis() : 0; // concert = 0
+    var voiced = 0;
+    for(var i=0;i<tp.events.length;i++){
+      var n = tp.events[i];
+      if(n.startSec < offsetSec - 0.001){ continue; }
+      if(n.startSec >= endSec){ continue; }
+      var st = audioStart + (n.startSec - offsetSec), midi = n.midi + writtenShift;
+      if(useSamples){ if(midi >= 0 && midi <= 127){ inst.play(midi, st, { duration: n.durSec, gain: 2.6 }); voiced++; } }
+      else { voice(midiToFreq(midi), st, n.durSec, master); voiced++; }
+    }
+    return voiced;
+  }
+
+  function tick(){
+    if(!tp.playing) return;
+    var posSec = tp.offsetSec + (actx.currentTime - tp.audioStart);
+    if(tp.loop && tp.loopA != null && tp.loopB != null && posSec >= tp.loopB){ seekAndPlay(tp.loopA); return; }
+    if(posSec >= tp.totalSec + 0.08){ stopPlayback(); return; }
+    updateTimeUI(Math.min(posSec, tp.totalSec));
+    highlightAt(posSec * 1000);
+    tp.raf = requestAnimationFrame(tick);
+  }
+
+  function runFrom(fromSec, inst){
+    tp.offsetSec = Math.max(0, Math.min(fromSec, tp.totalSec));
+    var v = scheduleAudioFrom(tp.offsetSec, inst);
+    tp.playing = true;
+    if(btnPlay){ btnPlay.textContent = inst ? "Pause" : "Pause (synth)"; }
+    if(btnStop){ btnStop.disabled = false; }
+    cancelAnimationFrame(tp.raf); tp.raf = requestAnimationFrame(tick);
+    try{ console.log("[sax audio] play from=" + tp.offsetSec.toFixed(2) + " engine=" + (inst?"samples":"synth") + " voiced=" + v); }catch(_){}
+  }
+
+  function startPlayback(fromSec){
+    if(!tp.events.length){ return; }
     try{ actx = actx || new (window.AudioContext || window.webkitAudioContext)(); }
     catch(e){ audioFail("Web Audio is not available in this browser.", e); return; }
-    stopPlayback();
-    errEl.textContent = "";
-    try{ console.log("[sax audio] kind=" + inputKind + " state=" + actx.state +
-      " notes=" + data.notes.length + " tempo=" + data.tempo); }catch(_){}
-    // resume() is async and, on some browsers, only settles after the click's
-    // microtask. Try the promise, but also schedule on a short fallback timer so a
-    // resume that never resolves can't leave us silent. go() is idempotent-guarded.
+    haltAudio(); errEl.textContent = "";
+    if(tp.loop && tp.loopA != null && fromSec < tp.loopA){ fromSec = tp.loopA; }
     var started = false;
     var go = function(){
       if(started) return; started = true;
       ensureSax().then(
-        function(inst){ schedule(data, inst); },
-        function(e){ try{ console.warn("[sax audio] samples unavailable, using synth", e); }catch(_){}
-                     schedule(data, null); }
+        function(inst){ runFrom(fromSec, inst); },
+        function(e){ try{ console.warn("[sax audio] samples unavailable, using synth", e); }catch(_){} runFrom(fromSec, null); }
       );
     };
-    if(actx.state !== "running" && actx.resume){
-      try{ actx.resume().then(go, go); }catch(e){ /* fall through to timer */ }
-      setTimeout(go, 250);
-    } else {
-      go();
-    }
+    if(actx.state !== "running" && actx.resume){ try{ actx.resume().then(go, go); }catch(e){} setTimeout(go, 250); }
+    else { go(); }
   }
 
-  // data.notes already carry final sounding MIDI pitches.
-  function schedule(data, inst){
-    try{
-      var useSamples = !!inst;
-      var spb = 60 / (data.tempo || 72); // seconds per quarter beat
-      if(!isFinite(spb) || spb <= 0){ spb = 60/72; }
-      var master = null;
-      if(!useSamples){
-        master = actx.createGain(); master.gain.value = 1.0; master.connect(actx.destination);
-        nodes.push({ stop:function(){ try{ master.disconnect(); }catch(e){} } });
-      }
-      var t0 = actx.currentTime + 0.2, total = 0, voiced = 0;
-      for(var i=0;i<data.notes.length;i++){
-        var nte = data.notes[i];
-        var st = t0 + nte.start * spb;
-        var du = Math.max(0.08, nte.dur * spb);
-        var midi = nte.midi;
-        if(useSamples){
-          if(midi >= 0 && midi <= 127){ inst.play(midi, st, { duration: du, gain: 2.6 }); voiced++; }
-        } else {
-          voice(midiToFreq(midi), st, du, master); voiced++;
-        }
-        total = Math.max(total, nte.start*spb + du);
-      }
-      try{ console.log("[sax audio] engine=" + (useSamples ? "samples" : "synth") + " voiced=" + voiced); }catch(_){}
-      if(!voiced){ audioFail("No notes could be played.", null); return; }
-      btnStop.disabled = false; btnPlay.textContent = useSamples ? "Playing…" : "Playing (synth)…";
-      playTimer = setTimeout(stopPlayback, (total + 0.6) * 1000);
-    }catch(e){ audioFail("Playback failed while scheduling notes.", e); }
+  function pausePlayback(){
+    if(!tp.playing) return;
+    tp.offsetSec = Math.min(tp.offsetSec + (actx.currentTime - tp.audioStart), tp.totalSec);
+    haltAudio();
+    if(btnPlay){ btnPlay.textContent = "Play"; }
   }
+
+  function seek(sec){
+    var wasPlaying = tp.playing;
+    haltAudio();
+    tp.offsetSec = Math.max(0, Math.min(sec, tp.totalSec));
+    updateTimeUI(tp.offsetSec); highlightAt(tp.offsetSec * 1000);
+    if(wasPlaying){ startPlayback(tp.offsetSec); }
+    else if(btnPlay){ btnPlay.textContent = "Play"; }
+  }
+  function seekAndPlay(sec){
+    haltAudio();
+    tp.offsetSec = Math.max(0, Math.min(sec, tp.totalSec));
+    updateTimeUI(tp.offsetSec); highlightAt(tp.offsetSec * 1000);
+    startPlayback(tp.offsetSec);
+  }
+
+  function play(){ if(tp.playing){ pausePlayback(); } else { startPlayback(tp.offsetSec); } }
 
   // ---------- Standard MIDI File parsing (for ABC playback via Verovio) ----------
   function b64ToBytes(b64){
@@ -905,6 +987,36 @@
   partSel.addEventListener("change", draw);
   btnPlay.addEventListener("click", play);
   btnStop.addEventListener("click", stopPlayback);
+  soundSel.addEventListener("change", function(){ if(tp.playing){ seek(currentPos()); } });
+  seekEl.addEventListener("input", function(){
+    seeking = true;
+    if(timeEl){ timeEl.textContent = fmtTime(seekEl.value/1000*tp.totalSec) + " / " + fmtTime(tp.totalSec); }
+  });
+  seekEl.addEventListener("change", function(){ seeking = false; seek(seekEl.value/1000*tp.totalSec); });
+  setAEl.addEventListener("click", function(){
+    tp.loopA = currentPos(); if(tp.loopB != null && tp.loopB <= tp.loopA){ tp.loopB = null; } updateAbInfo();
+  });
+  setBEl.addEventListener("click", function(){
+    tp.loopB = currentPos();
+    if(tp.loopA == null){ tp.loopA = 0; }
+    if(tp.loopB <= tp.loopA){ tp.loopB = Math.min(tp.totalSec, tp.loopA + 1); }
+    updateAbInfo();
+  });
+  loopClearEl.addEventListener("click", function(){ tp.loopA = tp.loopB = null; tp.loop = false; loopOnEl.checked = false; updateAbInfo(); });
+  loopOnEl.addEventListener("change", function(){
+    tp.loop = loopOnEl.checked;
+    if(tp.loop){ if(tp.loopA == null){ tp.loopA = 0; } if(tp.loopB == null){ tp.loopB = tp.totalSec; } }
+    updateAbInfo();
+  });
+  score.addEventListener("click", function(e){
+    if(!tp.events.length || !tk) return;
+    var el = e.target.closest ? (e.target.closest(".note") || e.target.closest("[id^='note']")) : null;
+    if(!el || !el.id) return;
+    var ms; try{ ms = tk.getTimeForElement(el.id); }catch(err){ return; }
+    ms = parseFloat(ms);
+    if(isNaN(ms) || ms < 0) return;
+    seekAndPlay(ms/1000);
+  });
   document.getElementById("sample").addEventListener("click", function(){ if(tk) loadXML(SAMPLE); });
   document.getElementById("sample-vn").addEventListener("click", function(){ if(tk) loadXML(VN_SAMPLE); });
   document.getElementById("paste-load").addEventListener("click", function(){

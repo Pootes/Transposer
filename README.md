@@ -97,6 +97,15 @@ sounds like a real horn. With no connection it falls back to a Web Audio synth t
 pitches a real alto actually produces reading this part (the song's true sound);
 "Written" sounds the noteheads at face value (a major sixth higher) to verify the page.
 
+The note sounding is highlighted on the staff as it plays (driven by Verovio's timemap).
+Play toggles play/pause, Stop resets, the seek bar scrubs, clicking a note jumps there, and
+Set A / Set B + "Loop A–B" repeats a chosen section for practice. Audio and the highlight
+are both derived from Verovio's MIDI export, so they stay on one shared timeline.
+
+PDF / scanned input is **not** handled in the browser — reliable optical music recognition
+is an unsolved problem and no free client-side engine does it accurately. Use the local
+Audiveris workflow in `omr/` to turn a scan into MusicXML, then load that file here.
+
 ## Known limits, stated plainly
 
 - Pitch is exact; enharmonic spelling of the written key is the renderer's call and
