@@ -12,6 +12,9 @@
 <script src="https://www.verovio.org/javascript/latest/verovio-toolkit-wasm.js"></script>
 <!-- fflate: unpacks compressed MusicXML (.mxl) in-browser. Offline: vendor/fflate.min.js -->
 <script src="https://cdnjs.cloudflare.com/ajax/libs/fflate/0.8.2/umd/index.min.js"></script>
+<!-- soundfont-player: streams recorded alto-sax samples for realistic playback.
+     Needs a connection; offline it falls back to the built-in synth. -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/soundfont-player/0.12.0/soundfont-player.min.js"></script>
 
 <style>
   :root{
@@ -143,7 +146,7 @@
         <option value="written">Written (noteheads at face value)</option>
       </select>
     </span>
-    <span class="meta" id="playmeta">Synthesized reed tone, not a sampled saxophone.</span>
+    <span class="meta" id="playmeta">Recorded alto-sax samples (falls back to a synth tone offline).</span>
   </div>
 
   <div class="paper"><div id="score"><div class="empty">Engine loading. When ready, <b>Load sample</b> or a MusicXML / .mxl file below.</div></div></div>
@@ -167,7 +170,7 @@
     <h3>Melody extraction</h3>
     <p><b>Melody only</b> keeps the top staff of a piano or multi-staff score, drops the accompaniment and bass clef, reduces any chords to the top (melody) note, keeps the lyrics, and labels the part Alto Sax, which is what a single-line sax part should be. Switch to <b>Full score</b> to render the source untouched.</p>
     <h3>Playback</h3>
-    <p>A synthesized reed-ish tone, built with the Web Audio API. It is an approximation for checking notes and rhythm, not a sampled saxophone. <b>Concert</b> plays what a real alto actually produces reading this part (the song's true pitch); <b>Written</b> sounds the noteheads at face value, a major sixth higher, for verifying what is on the page.</p>
+    <p>Playback uses <b>recorded alto-sax samples</b> (the MusyngKite soundfont), streamed the first time you press Play, so it sounds like a real horn rather than a synth. With no connection it falls back to a built-in synthesized tone. <b>Concert</b> plays what a real alto actually produces reading this part (the song's true pitch); <b>Written</b> sounds the noteheads at face value, a major sixth higher, for verifying what is on the page.</p>
     <h3>Getting music in</h3>
     <p>Export MusicXML (<code>.musicxml</code>, <code>.xml</code>, or <code>.mxl</code>) from any notation app; <code>.mxl</code> is unpacked in the browser. For a scanned PDF, use the Audiveris workflow in <code>omr/</code> first.</p>
   </div>
@@ -364,8 +367,23 @@
     return dec.decode(files[path]);
   }
 
-  // ---------- Web Audio playback (synthesized reed) ----------
+  // ---------- Playback: recorded alto-sax samples, synth fallback ----------
   var actx = null, nodes = [], playTimer = null;
+  var sfInst = null, sfLoad = null;  // sampled instrument + its loader promise
+
+  // Fetch the alto-sax sample set once, cache it. Resolves to the instrument,
+  // or rejects (offline / library blocked) so playback can fall back to synth.
+  function ensureSax(){
+    if(sfInst) return Promise.resolve(sfInst);
+    if(sfLoad) return sfLoad;
+    if(!window.Soundfont || !Soundfont.instrument){
+      return Promise.reject(new Error("sample library unavailable"));
+    }
+    btnPlay.textContent = "Loading sax…";
+    sfLoad = Soundfont.instrument(actx, "alto_sax", { soundfont: "MusyngKite" })
+      .then(function(inst){ sfInst = inst; return inst; });
+    return sfLoad;
+  }
 
   function parseMelodyNotes(xmlText){
     var doc = new DOMParser().parseFromString(xmlText, "application/xml");
@@ -429,6 +447,7 @@
 
   function stopPlayback(){
     if(playTimer){ clearTimeout(playTimer); playTimer = null; }
+    if(sfInst){ try{ sfInst.stop(); }catch(e){} }  // cancel sampled notes
     for(var i=0;i<nodes.length;i++){ try{ nodes[i].stop(); }catch(e){} }
     nodes = [];
     btnStop.disabled = true;
@@ -458,9 +477,17 @@
 
     // resume() is async and, on some browsers, only settles after the click's
     // microtask. Try the promise, but also schedule on a short fallback timer so a
-    // resume that never resolves can't leave us silent. schedule() is idempotent-guarded.
+    // resume that never resolves can't leave us silent. go() is idempotent-guarded.
     var started = false;
-    var go = function(){ if(started) return; started = true; schedule(data); };
+    var go = function(){
+      if(started) return; started = true;
+      // Prefer recorded samples; fall back to the synth if they won't load.
+      ensureSax().then(
+        function(inst){ schedule(data, inst); },
+        function(e){ try{ console.warn("[sax audio] samples unavailable, using synth", e); }catch(_){}
+                     schedule(data, null); }
+      );
+    };
     if(actx.state !== "running" && actx.resume){
       try{ actx.resume().then(go, go); }catch(e){ /* fall through to timer */ }
       setTimeout(go, 250);
@@ -469,25 +496,34 @@
     }
   }
 
-  function schedule(data){
+  function schedule(data, inst){
     try{
+      var useSamples = !!inst;
       var shift = soundSel.value === "written" ? altoSemis() : 0; // concert = sounding pitch
       var spb = 60 / (data.tempo || 72);                          // seconds per quarter beat
       if(!isFinite(spb) || spb <= 0){ spb = 60/72; }
-      var master = actx.createGain(); master.gain.value = 1.0; master.connect(actx.destination);
-      nodes.push({ stop:function(){ try{ master.disconnect(); }catch(e){} } });
-      var t0 = actx.currentTime + 0.12, total = 0, voiced = 0;
+      var master = null;
+      if(!useSamples){
+        master = actx.createGain(); master.gain.value = 1.0; master.connect(actx.destination);
+        nodes.push({ stop:function(){ try{ master.disconnect(); }catch(e){} } });
+      }
+      var t0 = actx.currentTime + 0.2, total = 0, voiced = 0;
       for(var i=0;i<data.notes.length;i++){
         var nte = data.notes[i];
         var st = t0 + nte.start * spb;
-        var du = Math.max(0.06, nte.dur * spb);
-        var f = midiToFreq(nte.midi + shift);
-        voice(f, st, du, master); voiced++;
+        var du = Math.max(0.08, nte.dur * spb);
+        var midi = nte.midi + shift;
+        if(useSamples){
+          if(midi >= 0 && midi <= 127){ inst.play(midi, st, { duration: du, gain: 2.6 }); voiced++; }
+        } else {
+          voice(midiToFreq(midi), st, du, master); voiced++;
+        }
         total = Math.max(total, nte.start*spb + du);
       }
-      if(!voiced){ audioFail("No notes could be synthesized.", null); return; }
-      btnStop.disabled = false; btnPlay.textContent = "Playing...";
-      playTimer = setTimeout(stopPlayback, (total + 0.4) * 1000);
+      try{ console.log("[sax audio] engine=" + (useSamples ? "samples" : "synth") + " voiced=" + voiced); }catch(_){}
+      if(!voiced){ audioFail("No notes could be played.", null); return; }
+      btnStop.disabled = false; btnPlay.textContent = useSamples ? "Playing…" : "Playing (synth)…";
+      playTimer = setTimeout(stopPlayback, (total + 0.6) * 1000);
     }catch(e){ audioFail("Playback failed while scheduling notes.", e); }
   }
 

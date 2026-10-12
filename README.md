@@ -57,13 +57,12 @@ Review the result; correct it in MuseScore if the arrangement fooled the heurist
 
 ## Playback
 
-The Play button synthesizes the melody with the Web Audio API: a sawtooth through a
-lowpass filter with light vibrato, which reads as reed-ish. It is an approximation
-for checking notes and rhythm, not a sampled saxophone. "Concert" plays the pitches
-a real alto actually produces reading this part (the song's true sound); "Written"
-sounds the noteheads at face value (a major sixth higher) to verify the page. For a
-real sampled sax timbre you would load a soundfont, which is a larger, network- or
-file-dependent addition not included here.
+The Play button plays the melody with **recorded alto-sax samples** (the MusyngKite
+soundfont, via `soundfont-player`), streamed the first time you press Play, so it
+sounds like a real horn. With no connection it falls back to a Web Audio synth tone
+(sawtooth through a lowpass) for checking notes and rhythm. "Concert" plays the
+pitches a real alto actually produces reading this part (the song's true sound);
+"Written" sounds the noteheads at face value (a major sixth higher) to verify the page.
 
 ## Known limits, stated plainly
 
@@ -71,7 +70,7 @@ file-dependent addition not included here.
   is worth a glance on first load. A concert part in A major becomes F# major (6
   sharps) for alto, which is correct but accidental-heavy.
 - Melody extraction is a heuristic (see above); verify the extracted line.
-- Playback is synthesized, not a real saxophone sample.
+- Playback uses recorded sax samples when online; offline it falls back to a synth tone.
 - No in-browser OMR. Scanning a PDF is a separate local Audiveris step (`omr/`), and
   its output must be reviewed before you trust it.
 - `.mxl` (compressed MusicXML) is unpacked in the browser; `.mxl` from the OMR
