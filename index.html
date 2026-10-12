@@ -1,0 +1,553 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Alto Sax Transposer</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Spectral:wght@500;600;700&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+
+<!--
+  Engraving: Verovio (WASM). OFFLINE: run vendor/setup.sh, point src at vendor/verovio-toolkit-wasm.js
+-->
+<script src="https://www.verovio.org/javascript/latest/verovio-toolkit-wasm.js"></script>
+<!-- fflate: unpacks compressed MusicXML (.mxl) in-browser. Offline: vendor/fflate.min.js -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/fflate/0.8.2/umd/index.min.js"></script>
+
+<style>
+  :root{
+    --bg:#f4f4f2; --surface:#ffffff; --fg:#1c1d22; --muted:#5d6068;
+    --line:#dcdcd6; --accent:#8a6a2f; --accent-fg:#ffffff; --danger:#9e2b25;
+    --good:#2f7d4f; --paper:#fcfbf7; --radius:10px;
+  }
+  @media (prefers-color-scheme:dark){ :root:not([data-theme="light"]){
+    --bg:#15161a; --surface:#1e2026; --fg:#e9e9ea; --muted:#9a9da6;
+    --line:#2d2f37; --accent:#c6a059; --accent-fg:#1a1b1f; --danger:#e2766f; --good:#5cbd84; color-scheme:dark;
+  }}
+  :root[data-theme="dark"]{
+    --bg:#15161a; --surface:#1e2026; --fg:#e9e9ea; --muted:#9a9da6;
+    --line:#2d2f37; --accent:#c6a059; --accent-fg:#1a1b1f; --danger:#e2766f; --good:#5cbd84; color-scheme:dark;
+  }
+  :root[data-theme="light"]{
+    --bg:#f4f4f2; --surface:#ffffff; --fg:#1c1d22; --muted:#5d6068;
+    --line:#dcdcd6; --accent:#8a6a2f; --accent-fg:#ffffff; --danger:#9e2b25; --good:#2f7d4f; color-scheme:light;
+  }
+  *{box-sizing:border-box} html,body{margin:0}
+  body{background:var(--bg);color:var(--fg);font-family:"IBM Plex Sans",system-ui,-apple-system,sans-serif;line-height:1.5}
+  .wrap{max-width:900px;margin:0 auto;padding-block:28px;padding-left:16px;padding-right:16px}
+  .top{display:flex;justify-content:space-between;align-items:flex-start;gap:16px;flex-wrap:wrap}
+  h1{font-family:"Spectral",Georgia,serif;font-weight:700;margin:0;font-size:clamp(1.7rem,5vw,2.4rem);line-height:1.1;letter-spacing:-.01em}
+  .sub{color:var(--muted);margin:.5rem 0 0;max-width:60ch}
+  .themebtn{font:inherit;font-size:.8rem;cursor:pointer;background:var(--surface);color:var(--fg);border:1px solid var(--line);border-radius:8px;padding:7px 11px;white-space:nowrap}
+  .themebtn:hover{border-color:var(--accent)}
+  .theory{margin-top:14px;padding:12px 14px;border:1px solid var(--line);border-left:3px solid var(--accent);border-radius:var(--radius);background:var(--surface);font-size:.9rem}
+  .theory b{font-weight:600}
+  .controls{display:flex;flex-wrap:wrap;gap:16px;margin-top:22px}
+  .field{display:flex;flex-direction:column;gap:5px;min-width:0;flex:1 1 160px}
+  .field label{font-size:.72rem;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);font-weight:600}
+  select{font:inherit;font-size:.95rem;padding:9px 11px;border-radius:8px;border:1px solid var(--line);background:var(--surface);color:var(--fg);width:100%}
+  select:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+  .readout{margin-top:20px;display:flex;flex-wrap:wrap;align-items:center;gap:10px 14px;padding:13px 16px;border:1px solid var(--line);border-radius:var(--radius);background:var(--surface)}
+  .readout .lbl{font-family:"Spectral",serif;font-size:1.05rem;font-weight:600}
+  .chip{font-size:.8rem;padding:3px 10px;border-radius:999px;background:var(--accent);color:var(--accent-fg);font-weight:600;font-variant-numeric:tabular-nums}
+  .seg{display:inline-flex;border:1px solid var(--line);border-radius:8px;overflow:hidden;margin-left:auto}
+  .seg button{font:inherit;font-size:.82rem;cursor:pointer;border:0;background:var(--surface);color:var(--fg);padding:7px 14px}
+  .seg button[aria-pressed="true"]{background:var(--accent);color:var(--accent-fg)}
+  .playbar{margin-top:14px;display:flex;flex-wrap:wrap;align-items:center;gap:10px 12px;padding:12px 16px;border:1px solid var(--line);border-radius:var(--radius);background:var(--surface)}
+  .playbar .pbtn{font:inherit;font-size:.9rem;font-weight:600;cursor:pointer;border-radius:8px;border:1px solid var(--accent);background:var(--accent);color:var(--accent-fg);padding:8px 18px;display:inline-flex;align-items:center;gap:8px}
+  .playbar .pbtn.stop{background:var(--surface);color:var(--fg);border-color:var(--line)}
+  .playbar .pbtn:disabled{opacity:.5;cursor:not-allowed}
+  .playbar .meta{font-size:.78rem;color:var(--muted);min-width:0;flex:1 1 180px}
+  .playbar .inl{display:flex;align-items:center;gap:7px;font-size:.8rem;color:var(--muted)}
+  .playbar select{width:auto;padding:6px 9px;font-size:.82rem}
+  .paper{margin-top:16px;background:var(--paper);border:1px solid var(--line);border-radius:var(--radius);padding:14px 16px;min-height:170px;overflow-x:auto;box-shadow:0 1px 3px rgba(0,0,0,.14)}
+  .paper :is(svg,canvas){max-width:100%;height:auto}
+  .paper .vrv-playing{fill:var(--accent) !important}
+  .empty{color:#6a6c72;font-size:.92rem;text-align:center;padding:40px 10px}
+  .empty b{color:#141519}
+  .io{margin-top:26px}
+  .iohead{display:flex;flex-wrap:wrap;gap:10px;align-items:center;justify-content:space-between}
+  .iohead h2{font-family:"Spectral",serif;font-size:1rem;font-weight:600;margin:0}
+  .rowbtns{display:flex;gap:8px;flex-wrap:wrap}
+  button.btn{font:inherit;cursor:pointer;border-radius:8px;border:1px solid var(--line);background:var(--surface);color:var(--fg);padding:7px 13px;font-size:.85rem;font-weight:500}
+  button.btn:hover{border-color:var(--accent)}
+  button.btn.primary{background:var(--accent);color:var(--accent-fg);border-color:var(--accent)}
+  button.btn:disabled{opacity:.5;cursor:not-allowed}
+  .filerow{display:flex;flex-wrap:wrap;gap:12px;align-items:center;margin-top:12px}
+  input[type=file]{font:inherit;font-size:.85rem;color:var(--muted)}
+  textarea{width:100%;margin-top:12px;min-height:100px;resize:vertical;font-family:ui-monospace,Menlo,Consolas,monospace;font-size:.8rem;line-height:1.5;padding:12px;border-radius:var(--radius);border:1px solid var(--line);background:var(--surface);color:var(--fg)}
+  textarea:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+  .err{margin-top:10px;color:var(--danger);font-size:.86rem;font-weight:500;min-height:1.1em}
+  .notes{margin-top:30px;border-top:1px solid var(--line);padding-top:18px;font-size:.84rem;color:var(--muted)}
+  .notes h3{font-family:"Spectral",serif;color:var(--fg);font-size:.95rem;margin:14px 0 6px}
+  .notes p{margin:.4rem 0}
+  .notes code{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:.82em;background:var(--surface);border:1px solid var(--line);padding:1px 5px;border-radius:5px}
+  @media print{.controls,.readout,.playbar,.io,.notes,.theory,.themebtn,.sub{display:none !important}.paper{border:0;box-shadow:none;background:#fff}h1{color:#000}}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="top">
+    <div>
+      <h1>Alto Sax Transposer</h1>
+      <p class="sub">Load a melody, get the written alto saxophone part, and hear it played back. Transpose, melody extraction, and audio all run in your browser.</p>
+    </div>
+    <button class="themebtn" id="themebtn" type="button">Theme</button>
+  </div>
+
+  <div class="theory">
+    <b>Alto saxophone is an E&flat; instrument.</b> A written note sounds a major sixth lower than concert pitch, so a concert-pitch part transposes <b>up a major sixth (M6, 9 semitones)</b>, adding 3 sharps to the key signature.
+  </div>
+
+  <div class="controls">
+    <div class="field">
+      <label for="src">Source part is written for</label>
+      <select id="src">
+        <option value="C" selected>Concert pitch (piano, voice, lead sheet)</option>
+        <option value="Bb">B&flat; instrument (trumpet, clarinet, tenor sax)</option>
+        <option value="F">F instrument (French horn, English horn)</option>
+        <option value="Eb">E&flat; instrument (already alto/bari written)</option>
+      </select>
+    </div>
+    <div class="field">
+      <label for="oct">Octave adjust (to fit the staff)</label>
+      <select id="oct">
+        <option value="-1">Down one octave</option>
+        <option value="0" selected>No change</option>
+        <option value="1">Up one octave</option>
+      </select>
+    </div>
+    <div class="field">
+      <label for="part">Part extraction</label>
+      <select id="part">
+        <option value="melody" selected>Melody only (single sax line)</option>
+        <option value="full">Full score (as written)</option>
+      </select>
+    </div>
+  </div>
+
+  <div class="readout">
+    <span class="lbl" id="viewlabel">Alto saxophone (written)</span>
+    <span class="chip" id="shiftchip">M6 - +9 st</span>
+    <span class="seg" role="group" aria-label="View">
+      <button id="view-alto" type="button" aria-pressed="true">Alto</button>
+      <button id="view-orig" type="button" aria-pressed="false">Original</button>
+    </span>
+  </div>
+
+  <div class="playbar">
+    <button class="pbtn" id="play" type="button" disabled>Play</button>
+    <button class="pbtn stop" id="stop" type="button" disabled>Stop</button>
+    <span class="inl">Sound
+      <select id="sound">
+        <option value="concert" selected>Concert (how it really sounds)</option>
+        <option value="written">Written (noteheads at face value)</option>
+      </select>
+    </span>
+    <span class="meta" id="playmeta">Synthesized reed tone, not a sampled saxophone.</span>
+  </div>
+
+  <div class="paper"><div id="score"><div class="empty">Engine loading. When ready, <b>Load sample</b> or a MusicXML / .mxl file below.</div></div></div>
+
+  <div class="io">
+    <div class="iohead">
+      <h2>Input</h2>
+      <div class="rowbtns">
+        <button class="btn" id="sample" type="button">Load sample</button>
+        <button class="btn" id="paste-load" type="button">Render pasted XML</button>
+        <button class="btn" id="svg" type="button" disabled>Download SVG</button>
+        <button class="btn primary" id="print" type="button" disabled>Print / Save PDF</button>
+      </div>
+    </div>
+    <div class="filerow"><input type="file" id="file" accept=".musicxml,.xml,.mei,.mxl"></div>
+    <textarea id="paste" spellcheck="false" placeholder="...or paste raw MusicXML / MEI here, then press Render pasted XML"></textarea>
+    <div class="err" id="err" role="alert"></div>
+  </div>
+
+  <div class="notes">
+    <h3>Melody extraction</h3>
+    <p><b>Melody only</b> keeps the top staff of a piano or multi-staff score, drops the accompaniment and bass clef, reduces any chords to the top (melody) note, keeps the lyrics, and labels the part Alto Sax, which is what a single-line sax part should be. Switch to <b>Full score</b> to render the source untouched.</p>
+    <h3>Playback</h3>
+    <p>A synthesized reed-ish tone, built with the Web Audio API. It is an approximation for checking notes and rhythm, not a sampled saxophone. <b>Concert</b> plays what a real alto actually produces reading this part (the song's true pitch); <b>Written</b> sounds the noteheads at face value, a major sixth higher, for verifying what is on the page.</p>
+    <h3>Getting music in</h3>
+    <p>Export MusicXML (<code>.musicxml</code>, <code>.xml</code>, or <code>.mxl</code>) from any notation app; <code>.mxl</code> is unpacked in the browser. For a scanned PDF, use the Audiveris workflow in <code>omr/</code> first.</p>
+  </div>
+</div>
+
+<script>
+(function(){
+  "use strict";
+  var score = document.getElementById("score");
+  var errEl = document.getElementById("err");
+  var srcSel = document.getElementById("src");
+  var octSel = document.getElementById("oct");
+  var partSel = document.getElementById("part");
+  var soundSel = document.getElementById("sound");
+  var chip = document.getElementById("shiftchip");
+  var viewLabel = document.getElementById("viewlabel");
+  var btnAlto = document.getElementById("view-alto");
+  var btnOrig = document.getElementById("view-orig");
+  var btnSvg = document.getElementById("svg");
+  var btnPrint = document.getElementById("print");
+  var btnPlay = document.getElementById("play");
+  var btnStop = document.getElementById("stop");
+  var playMeta = document.getElementById("playmeta");
+
+  var INTERVALS = {
+    C:  { "-1":"-m3", "0":"M6",  "1":"M13" },
+    Bb: { "-1":"-P4", "0":"P5",  "1":"P12" },
+    F:  { "-1":"-m7", "0":"M2",  "1":"M9"  },
+    Eb: { "-1":"-P8", "0":"P1",  "1":"P8"  }
+  };
+  var SEMI = { C:9, Bb:7, F:2, Eb:0 };
+  var STEP = { C:0, D:2, E:4, F:5, G:7, A:9, B:11 };
+
+  var tk = null, rawXML = null, mode = "alto", scale = 40, resizeTimer = null;
+
+  var SAMPLE = [
+    '<?xml version="1.0" encoding="UTF-8"?>',
+    '<score-partwise version="3.1"><part-list><score-part id="P1"><part-name>Melody</part-name></score-part></part-list><part id="P1">',
+    '<measure number="1"><attributes><divisions>1</divisions><key><fifths>0</fifths></key><time><beats>4</beats><beat-type>4</beat-type></time><clef><sign>G</sign><line>2</line></clef></attributes>',
+    '<note><pitch><step>C</step><octave>4</octave></pitch><duration>1</duration><type>quarter</type></note>',
+    '<note><pitch><step>D</step><octave>4</octave></pitch><duration>1</duration><type>quarter</type></note>',
+    '<note><pitch><step>E</step><octave>4</octave></pitch><duration>1</duration><type>quarter</type></note>',
+    '<note><pitch><step>F</step><octave>4</octave></pitch><duration>1</duration><type>quarter</type></note></measure>',
+    '<measure number="2">',
+    '<note><pitch><step>G</step><octave>4</octave></pitch><duration>1</duration><type>quarter</type></note>',
+    '<note><pitch><step>A</step><octave>4</octave></pitch><duration>1</duration><type>quarter</type></note>',
+    '<note><pitch><step>B</step><octave>4</octave></pitch><duration>1</duration><type>quarter</type></note>',
+    '<note><pitch><step>C</step><octave>5</octave></pitch><duration>1</duration><type>quarter</type></note></measure>',
+    '</part></score-partwise>'
+  ].join("");
+
+  function pitchToMidi(pitchEl){
+    if(!pitchEl) return null;
+    var step = pitchEl.getElementsByTagName("step")[0];
+    var oct = pitchEl.getElementsByTagName("octave")[0];
+    var alt = pitchEl.getElementsByTagName("alter")[0];
+    if(!step || !oct) return null;
+    var a = alt ? parseInt(alt.textContent, 10) : 0;
+    return (parseInt(oct.textContent, 10) + 1) * 12 + STEP[step.textContent] + a;
+  }
+
+  // Reduce a multi-staff / piano score to a single monophonic Alto Sax melody line.
+  function extractMelody(xmlText){
+    var doc = new DOMParser().parseFromString(xmlText, "application/xml");
+    if(doc.getElementsByTagName("parsererror").length){ return xmlText; }
+    var nm = doc.getElementsByTagName("part-name"), i, j;
+    for(i=0;i<nm.length;i++){ nm[i].textContent = "Alto Sax"; }
+    var ab = doc.getElementsByTagName("part-abbreviation");
+    for(i=0;i<ab.length;i++){ ab[i].textContent = "A.Sax"; }
+
+    var measures = doc.getElementsByTagName("measure");
+    for(i=0;i<measures.length;i++){
+      var m = measures[i];
+      // attributes: one staff, treble clef only
+      var attrs = m.getElementsByTagName("attributes");
+      for(j=0;j<attrs.length;j++){
+        var st = attrs[j].getElementsByTagName("staves")[0];
+        if(st){ st.parentNode.removeChild(st); }
+        var clefs = attrs[j].getElementsByTagName("clef"), c;
+        for(var k=clefs.length-1;k>=0;k--){
+          c = clefs[k];
+          if(c.getAttribute("number") === "2"){ c.parentNode.removeChild(c); }
+          else if(c.getAttribute("number") === "1"){ c.removeAttribute("number"); }
+        }
+      }
+      // drop <backup> (used to rewind for the second staff)
+      var bks = m.getElementsByTagName("backup");
+      for(j=bks.length-1;j>=0;j--){ bks[j].parentNode.removeChild(bks[j]); }
+      // drop staff-2 notes and <staff> tags (lyrics are kept)
+      var notes = m.getElementsByTagName("note");
+      for(j=notes.length-1;j>=0;j--){
+        var s = notes[j].getElementsByTagName("staff")[0];
+        if(s && s.textContent === "2"){ notes[j].parentNode.removeChild(notes[j]); }
+      }
+      notes = m.getElementsByTagName("note");
+      for(j=0;j<notes.length;j++){
+        var sf = notes[j].getElementsByTagName("staff")[0];
+        if(sf){ sf.parentNode.removeChild(sf); }
+      }
+      // reduce chords to the top note
+      var list = [].slice.call(m.getElementsByTagName("note"));
+      var idx = 0;
+      while(idx < list.length){
+        var grp = [list[idx]], n = idx + 1;
+        while(n < list.length && list[n].getElementsByTagName("chord")[0]){ grp.push(list[n]); n++; }
+        if(grp.length > 1){
+          var top = grp[0], topM = pitchToMidi(grp[0].getElementsByTagName("pitch")[0]);
+          for(k=1;k<grp.length;k++){
+            var mm = pitchToMidi(grp[k].getElementsByTagName("pitch")[0]);
+            if(mm !== null && (topM === null || mm > topM)){ top = grp[k]; topM = mm; }
+          }
+          var ch = top.getElementsByTagName("chord")[0];
+          if(ch){ ch.parentNode.removeChild(ch); }
+          for(k=0;k<grp.length;k++){
+            if(grp[k] !== top){
+              // keep any lyric that sat on a discarded chord member
+              if(!top.getElementsByTagName("lyric").length){
+                var moveLy = grp[k].getElementsByTagName("lyric");
+                while(moveLy.length){ top.appendChild(moveLy[0]); }
+              }
+              grp[k].parentNode.removeChild(grp[k]);
+            }
+          }
+        }
+        idx = n;
+      }
+    }
+    return new XMLSerializer().serializeToString(doc);
+  }
+
+  function displayXML(){
+    if(!rawXML) return null;
+    return partSel.value === "melody" ? extractMelody(rawXML) : rawXML;
+  }
+
+  function currentInterval(){ return mode === "alto" ? INTERVALS[srcSel.value][octSel.value] : "P1"; }
+  function altoSemis(){ return SEMI[srcSel.value] + parseInt(octSel.value,10)*12; }
+
+  function refreshChip(){
+    if(mode !== "alto"){ chip.textContent = "original - 0 st"; return; }
+    var st = altoSemis();
+    chip.textContent = currentInterval() + " - " + (st>=0?"+":"") + st + " st";
+  }
+
+  function draw(){
+    stopPlayback();
+    errEl.textContent = "";
+    refreshChip();
+    viewLabel.textContent = mode === "alto" ? "Alto saxophone (written)" : "Original (as loaded)";
+    var xml = displayXML();
+    if(!tk || !xml){ return; }
+    var w = Math.max(560, score.clientWidth);
+    tk.setOptions({
+      transpose: currentInterval(),
+      pageWidth: Math.round(w * 100 / scale),
+      scale: scale, adjustPageHeight: true, breaks: "auto",
+      header: "none", footer: "none",
+      pageMarginTop: 12, pageMarginBottom: 12, pageMarginLeft: 12, pageMarginRight: 12
+    });
+    var ok = tk.loadData(xml);
+    if(!ok){
+      errEl.textContent = "Verovio could not load that data. " + (tk.getLog ? tk.getLog() : "");
+      score.innerHTML = '<div class="empty">Load failed. Confirm the file is valid MusicXML or MEI.</div>';
+      btnSvg.disabled = btnPrint.disabled = btnPlay.disabled = true;
+      return;
+    }
+    var pages = tk.getPageCount(), svg = "";
+    for(var p=1; p<=pages; p++){ svg += tk.renderToSVG(p); }
+    score.innerHTML = svg;
+    btnSvg.disabled = btnPrint.disabled = btnPlay.disabled = false;
+  }
+
+  function loadXML(xml){ rawXML = xml; draw(); }
+
+  function setMode(m){
+    mode = m;
+    btnAlto.setAttribute("aria-pressed", m==="alto"?"true":"false");
+    btnOrig.setAttribute("aria-pressed", m==="alto"?"false":"true");
+    draw();
+  }
+
+  function readMxl(arrayBuffer){
+    if(!window.fflate){ throw new Error("zip reader not loaded (self-host fflate for offline use)"); }
+    var files = fflate.unzipSync(new Uint8Array(arrayBuffer));
+    var dec = new TextDecoder(), path = null, k;
+    if(files["META-INF/container.xml"]){
+      var m = dec.decode(files["META-INF/container.xml"]).match(/full-path="([^"]+)"/);
+      if(m){ path = m[1]; }
+    }
+    if(!path || !files[path]){
+      for(k in files){ if(!/^META-INF\//.test(k) && /\.(xml|musicxml)$/i.test(k)){ path = k; break; } }
+    }
+    if(!path || !files[path]){ throw new Error("no MusicXML entry inside the .mxl"); }
+    return dec.decode(files[path]);
+  }
+
+  // ---------- Web Audio playback (synthesized reed) ----------
+  var actx = null, nodes = [], playTimer = null;
+
+  function parseMelodyNotes(xmlText){
+    var doc = new DOMParser().parseFromString(xmlText, "application/xml");
+    if(doc.getElementsByTagName("parsererror").length){ return { tempo:72, notes:[] }; }
+    var divEl = doc.getElementsByTagName("divisions")[0];
+    var divisions = divEl ? parseInt(divEl.textContent,10) : 1;
+    var tempo = 72;
+    var snd = doc.querySelector("sound[tempo]");
+    if(snd){ tempo = parseFloat(snd.getAttribute("tempo")) || 72; }
+    else { var pm = doc.getElementsByTagName("per-minute")[0]; if(pm){ tempo = parseFloat(pm.textContent) || 72; } }
+
+    var out = [], t = 0, measures = doc.getElementsByTagName("measure"), i, j;
+    for(i=0;i<measures.length;i++){
+      var kids = measures[i].childNodes;
+      for(j=0;j<kids.length;j++){
+        var el = kids[j];
+        if(el.nodeType !== 1) continue;
+        if(el.tagName === "note"){
+          if(el.getElementsByTagName("chord")[0]) continue; // melody already monophonic
+          var durEl = el.getElementsByTagName("duration")[0];
+          var dur = durEl ? parseInt(durEl.textContent,10)/divisions : 0; // quarter-note beats
+          var midi = pitchToMidi(el.getElementsByTagName("pitch")[0]);
+          if(midi !== null){ out.push({ midi:midi, start:t, dur:dur }); }
+          t += dur;
+        } else if(el.tagName === "backup"){
+          var d = el.getElementsByTagName("duration")[0];
+          if(d){ t -= parseInt(d.textContent,10)/divisions; }
+        } else if(el.tagName === "forward"){
+          var f = el.getElementsByTagName("duration")[0];
+          if(f){ t += parseInt(f.textContent,10)/divisions; }
+        }
+      }
+    }
+    return { tempo:tempo, notes:out, divisions:divisions };
+  }
+
+  function midiToFreq(m){ return 440 * Math.pow(2, (m-69)/12); }
+
+  function voice(freq, t0, dur, gainOut){
+    if(!isFinite(freq) || !isFinite(t0) || !isFinite(dur) || dur <= 0) return;
+    // sawtooth through a lowpass = reed-ish. Linear envelope with strictly
+    // increasing time points (exponential ramps and out-of-order events were the
+    // old failure mode: they can throw or go silent on short notes).
+    var osc = actx.createOscillator(); osc.type = "sawtooth"; osc.frequency.setValueAtTime(freq, t0);
+    var lp = actx.createBiquadFilter(); lp.type = "lowpass";
+    lp.frequency.setValueAtTime(Math.min(8000, freq*4 + 800), t0); lp.Q.value = 0.9;
+    var g = actx.createGain();
+    var peak = 0.32;
+    var atk = Math.min(0.015, dur*0.25);
+    var rel = Math.min(0.09, dur*0.35);
+    var susEnd = Math.max(t0 + atk, t0 + dur - rel);
+    var end = t0 + dur;
+    g.gain.setValueAtTime(0, t0);
+    g.gain.linearRampToValueAtTime(peak, t0 + atk);
+    g.gain.setValueAtTime(peak, susEnd);
+    g.gain.linearRampToValueAtTime(0, end);
+    osc.connect(lp); lp.connect(g); g.connect(gainOut);
+    osc.start(t0); osc.stop(end + 0.03);
+    nodes.push(osc);
+  }
+
+  function stopPlayback(){
+    if(playTimer){ clearTimeout(playTimer); playTimer = null; }
+    for(var i=0;i<nodes.length;i++){ try{ nodes[i].stop(); }catch(e){} }
+    nodes = [];
+    btnStop.disabled = true;
+    btnPlay.textContent = "Play";
+  }
+
+  function audioFail(msg, e){
+    try{ console.error("[sax audio] " + msg, e || ""); }catch(_){}
+    errEl.textContent = msg + (e && e.message ? " (" + e.message + ")" : "");
+    btnStop.disabled = true; btnPlay.textContent = "Play";
+  }
+
+  function play(){
+    var data;
+    try{
+      var xml = displayXML(); if(!xml){ return; }
+      data = parseMelodyNotes(xml);
+    }catch(e){ audioFail("Could not read the notes to play.", e); return; }
+    if(!data.notes.length){ errEl.textContent = "No playable melody notes found in this part."; return; }
+
+    try{ actx = actx || new (window.AudioContext || window.webkitAudioContext)(); }
+    catch(e){ audioFail("Web Audio is not available in this browser.", e); return; }
+    stopPlayback();
+    errEl.textContent = "";
+    try{ console.log("[sax audio] state=" + actx.state + " sampleRate=" + actx.sampleRate +
+      " notes=" + data.notes.length + " tempo=" + data.tempo); }catch(_){}
+
+    // resume() is async and, on some browsers, only settles after the click's
+    // microtask. Try the promise, but also schedule on a short fallback timer so a
+    // resume that never resolves can't leave us silent. schedule() is idempotent-guarded.
+    var started = false;
+    var go = function(){ if(started) return; started = true; schedule(data); };
+    if(actx.state !== "running" && actx.resume){
+      try{ actx.resume().then(go, go); }catch(e){ /* fall through to timer */ }
+      setTimeout(go, 250);
+    } else {
+      go();
+    }
+  }
+
+  function schedule(data){
+    try{
+      var shift = soundSel.value === "written" ? altoSemis() : 0; // concert = sounding pitch
+      var spb = 60 / (data.tempo || 72);                          // seconds per quarter beat
+      if(!isFinite(spb) || spb <= 0){ spb = 60/72; }
+      var master = actx.createGain(); master.gain.value = 1.0; master.connect(actx.destination);
+      nodes.push({ stop:function(){ try{ master.disconnect(); }catch(e){} } });
+      var t0 = actx.currentTime + 0.12, total = 0, voiced = 0;
+      for(var i=0;i<data.notes.length;i++){
+        var nte = data.notes[i];
+        var st = t0 + nte.start * spb;
+        var du = Math.max(0.06, nte.dur * spb);
+        var f = midiToFreq(nte.midi + shift);
+        voice(f, st, du, master); voiced++;
+        total = Math.max(total, nte.start*spb + du);
+      }
+      if(!voiced){ audioFail("No notes could be synthesized.", null); return; }
+      btnStop.disabled = false; btnPlay.textContent = "Playing...";
+      playTimer = setTimeout(stopPlayback, (total + 0.4) * 1000);
+    }catch(e){ audioFail("Playback failed while scheduling notes.", e); }
+  }
+
+  function boot(){
+    try { tk = new verovio.toolkit(); }
+    catch(e){ errEl.textContent = "Verovio failed to initialise: " + e.message; return; }
+    score.innerHTML = '<div class="empty">Engine ready. <b>Load sample</b> or a MusicXML / .mxl file below.</div>';
+  }
+  if(window.verovio && verovio.module){
+    if(verovio.module.calledRun){ boot(); } else { verovio.module.onRuntimeInitialized = boot; }
+  } else {
+    errEl.textContent = "Verovio script did not load. If self-hosting, run vendor/setup.sh and check the path. Otherwise check your connection.";
+  }
+
+  btnAlto.addEventListener("click", function(){ setMode("alto"); });
+  btnOrig.addEventListener("click", function(){ setMode("orig"); });
+  srcSel.addEventListener("change", draw);
+  octSel.addEventListener("change", draw);
+  partSel.addEventListener("change", draw);
+  btnPlay.addEventListener("click", play);
+  btnStop.addEventListener("click", stopPlayback);
+  document.getElementById("sample").addEventListener("click", function(){ if(tk) loadXML(SAMPLE); });
+  document.getElementById("paste-load").addEventListener("click", function(){
+    var v = document.getElementById("paste").value.trim();
+    if(!v){ errEl.textContent = "Paste some MusicXML first."; return; }
+    loadXML(v);
+  });
+  document.getElementById("file").addEventListener("change", function(e){
+    var f = e.target.files && e.target.files[0]; if(!f) return;
+    var r = new FileReader();
+    r.onerror = function(){ errEl.textContent = "Could not read that file."; };
+    if(/\.mxl$/i.test(f.name)){
+      r.onload = function(){ try { loadXML(readMxl(r.result)); } catch(err){ errEl.textContent = "Could not unpack that .mxl: " + err.message; } };
+      r.readAsArrayBuffer(f);
+    } else {
+      r.onload = function(){ loadXML(String(r.result)); };
+      r.readAsText(f);
+    }
+  });
+  document.getElementById("svg").addEventListener("click", function(){
+    var svg = score.querySelector("svg"); if(!svg){ return; }
+    var data = new XMLSerializer().serializeToString(svg);
+    if(data.indexOf("xmlns") === -1){ data = data.replace("<svg", '<svg xmlns="http://www.w3.org/2000/svg"'); }
+    var url = URL.createObjectURL(new Blob([data], {type:"image/svg+xml;charset=utf-8"}));
+    var a = document.createElement("a"); a.href = url; a.download = "alto-part.svg";
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(function(){ URL.revokeObjectURL(url); }, 1000);
+  });
+  document.getElementById("print").addEventListener("click", function(){ window.print(); });
+  document.getElementById("themebtn").addEventListener("click", function(){
+    var cur = document.documentElement.getAttribute("data-theme");
+    var dark = window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches;
+    document.documentElement.setAttribute("data-theme", cur ? (cur==="dark"?"light":"dark") : (dark?"light":"dark"));
+  });
+  window.addEventListener("resize", function(){
+    clearTimeout(resizeTimer); resizeTimer = setTimeout(function(){ if(rawXML) draw(); }, 200);
+  });
+
+  refreshChip();
+})();
+</script>
+</body>
+</html>

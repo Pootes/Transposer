@@ -1,0 +1,14 @@
+# Claude / Claude Code artifacts — never commit these
+.claude/
+.claude.json
+.claude.local.json
+CLAUDE.md
+CLAUDE.local.md
+.anthropic/
+**/.claude/
+
+# OS / editor noise
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
