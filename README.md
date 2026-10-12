@@ -32,6 +32,15 @@ Then change the `<script src>` line in `index.html` to `vendor/verovio-toolkit-w
 (and in `index-osmd.html` to `vendor/opensheetmusicdisplay.min.js`). The Verovio
 `.wasm` is resolved next to its JS, so keep both in `vendor/`.
 
+## Source detection
+
+On load, the tool inspects the file's first part and sets the source dropdown
+automatically. It reads the instrument name and General MIDI program for a readable
+label (Piano, Guitar, Voice, Trumpet, ...), and the MusicXML `<transpose>` element
+to decide whether the part is concert, Bb, F, or Eb written pitch. It also notes when
+a file is a multi-staff (grand-staff) piano arrangement, where "Melody only" applies.
+This is a best guess from metadata; a manual change to the dropdown is kept.
+
 ## The transposition
 
 Alto saxophone is an Eb instrument: a written note sounds a major sixth lower than

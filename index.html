@@ -55,6 +55,11 @@
   .seg{display:inline-flex;border:1px solid var(--line);border-radius:8px;overflow:hidden;margin-left:auto}
   .seg button{font:inherit;font-size:.82rem;cursor:pointer;border:0;background:var(--surface);color:var(--fg);padding:7px 14px}
   .seg button[aria-pressed="true"]{background:var(--accent);color:var(--accent-fg)}
+  .detect{margin:10px 0 0;font-size:.82rem;color:var(--muted);display:flex;flex-wrap:wrap;align-items:center;gap:6px 8px}
+  .detect[hidden]{display:none}
+  .detect b{color:var(--fg);font-weight:600}
+  .detect .tag{padding:2px 8px;border-radius:999px;border:1px solid var(--line);background:var(--surface);font-variant-numeric:tabular-nums}
+  .detect .tag.warn{border-color:var(--danger);color:var(--danger)}
   .playbar{margin-top:14px;display:flex;flex-wrap:wrap;align-items:center;gap:10px 12px;padding:12px 16px;border:1px solid var(--line);border-radius:var(--radius);background:var(--surface)}
   .playbar .pbtn{font:inherit;font-size:.9rem;font-weight:600;cursor:pointer;border-radius:8px;border:1px solid var(--accent);background:var(--accent);color:var(--accent-fg);padding:8px 18px;display:inline-flex;align-items:center;gap:8px}
   .playbar .pbtn.stop{background:var(--surface);color:var(--fg);border-color:var(--line)}
@@ -137,6 +142,8 @@
     </span>
   </div>
 
+  <p class="detect" id="detect" hidden></p>
+
   <div class="playbar">
     <button class="pbtn" id="play" type="button" disabled>Play</button>
     <button class="pbtn stop" id="stop" type="button" disabled>Stop</button>
@@ -167,6 +174,8 @@
   </div>
 
   <div class="notes">
+    <h3>Source detection</h3>
+    <p>On load, the tool reads the file's first part &mdash; its instrument name, General MIDI program, and any written-pitch <code>transpose</code> &mdash; and sets <b>Source part is written for</b> automatically (concert, B&flat;, F, or E&flat;). It also flags grand-staff piano files, where <b>Melody only</b> is the right choice. It is a best guess from the file's metadata; change the dropdown yourself and it stays on your choice.</p>
     <h3>Melody extraction</h3>
     <p><b>Melody only</b> keeps the top staff of a piano or multi-staff score, drops the accompaniment and bass clef, reduces any chords to the top (melody) note, keeps the lyrics, and labels the part Alto Sax, which is what a single-line sax part should be. Switch to <b>Full score</b> to render the source untouched.</p>
     <h3>Playback</h3>
@@ -194,6 +203,8 @@
   var btnPlay = document.getElementById("play");
   var btnStop = document.getElementById("stop");
   var playMeta = document.getElementById("playmeta");
+  var detectEl = document.getElementById("detect");
+  var srcUserSet = false; // true once the user manually picks a source instrument
 
   var INTERVALS = {
     C:  { "-1":"-m3", "0":"M6",  "1":"M13" },
@@ -343,7 +354,106 @@
     btnSvg.disabled = btnPrint.disabled = btnPlay.disabled = false;
   }
 
-  function loadXML(xml){ rawXML = xml; draw(); }
+  // ---------- Source-instrument detection ----------
+  // Read a readable instrument family from the part name / General MIDI program.
+  function familyFromNameProgram(name, prog){
+    var n = (name || "").toLowerCase();
+    function has(){ for(var i=0;i<arguments.length;i++){ if(n.indexOf(arguments[i])>=0) return true; } return false; }
+    if(has("alto sax","alto saxophone")) return "Alto saxophone";
+    if(has("tenor sax","tenor saxophone")) return "Tenor saxophone";
+    if(has("bari sax","baritone sax")) return "Baritone saxophone";
+    if(has("soprano sax")) return "Soprano saxophone";
+    if(has("sax")) return "Saxophone";
+    if(has("trumpet","tpt","cornet","flugel")) return "Trumpet";
+    if(has("clarinet","clar")) return "Clarinet";
+    if(has("flute","flt","piccolo","recorder")) return "Flute / pipe";
+    if(has("oboe","english horn","cor anglais")) return "Oboe / English horn";
+    if(has("bassoon")) return "Bassoon";
+    if(has("french horn","horn in")) return "French horn";
+    if(has("trombone","tbn")) return "Trombone";
+    if(has("tuba","euphonium")) return "Low brass";
+    if(has("violin","vln","fiddle")) return "Violin";
+    if(has("viola")) return "Viola";
+    if(has("cello","violoncello")) return "Cello";
+    if(has("double bass","contrabass","upright bass")) return "Double bass";
+    if(has("piano","keyboard","klavier","clavier","pno","grand")) return "Piano";
+    if(has("organ","harpsichord")) return "Keyboard";
+    if(has("guitar","gtr","guitarra","ukulele")) return "Guitar";
+    if(has("bass")) return "Bass";
+    if(has("voice","vocal","vox","choir","chorus","soprano","baritone","gesang","lead","melody","song")) return "Voice / melody";
+    if(has("string")) return "Strings";
+    if(prog){
+      if(prog>=1&&prog<=8) return "Piano";
+      if(prog>=17&&prog<=24) return "Organ";
+      if(prog>=25&&prog<=32) return "Guitar";
+      if(prog>=33&&prog<=40) return "Bass";
+      if(prog>=41&&prog<=52) return "Strings";
+      if(prog>=53&&prog<=56) return "Voice";
+      if(prog>=57&&prog<=64) return "Brass";
+      if(prog>=65&&prog<=72) return "Reed (sax / clarinet / oboe)";
+      if(prog>=73&&prog<=80) return "Flute / pipe";
+    }
+    return name || "unknown instrument";
+  }
+
+  // Inspect the first part: its name/program, its written transposition, and how
+  // many staves it has. Returns the source-key class our transposer expects.
+  function detectSource(xmlText){
+    var doc = new DOMParser().parseFromString(xmlText, "application/xml");
+    if(doc.getElementsByTagName("parsererror").length) return null;
+    var sp = doc.getElementsByTagName("score-part")[0];
+    var name = "";
+    if(sp){
+      var inm = sp.getElementsByTagName("instrument-name")[0];
+      var pn = sp.getElementsByTagName("part-name")[0];
+      name = (inm && inm.textContent.trim()) || (pn && pn.textContent.trim()) || "";
+    }
+    var mp = doc.getElementsByTagName("midi-program")[0];
+    var prog = mp ? parseInt(mp.textContent, 10) : null;
+
+    // <transpose> = interval from WRITTEN to SOUNDING pitch, in semitones.
+    var tr = doc.getElementsByTagName("transpose")[0], chrom = 0, hasTr = false;
+    if(tr){
+      var ch = tr.getElementsByTagName("chromatic")[0];
+      if(ch){ chrom = parseInt(ch.textContent, 10) || 0; hasTr = true; }
+      var oc = tr.getElementsByTagName("octave-change")[0];
+      if(oc){ chrom += (parseInt(oc.textContent, 10) || 0) * 12; }
+    }
+    var st = doc.getElementsByTagName("staves")[0];
+    var staves = st ? (parseInt(st.textContent, 10) || 1) : 1;
+
+    var srcKey = "C", trLabel = "concert pitch", uncertain = false;
+    if(hasTr && chrom % 12 !== 0){
+      var pc = ((chrom % 12) + 12) % 12; // pitch-class distance written->sounding
+      if(pc === 10){ srcKey = "Bb"; trLabel = "B♭ instrument"; }
+      else if(pc === 5){ srcKey = "F"; trLabel = "F instrument"; }
+      else if(pc === 3){ srcKey = "Eb"; trLabel = "E♭ instrument"; }
+      else { srcKey = "C"; trLabel = "transposes " + chrom + " st — set source manually"; uncertain = true; }
+    }
+    return {
+      srcKey: srcKey, trLabel: trLabel, uncertain: uncertain,
+      family: familyFromNameProgram(name, prog), name: name,
+      staves: staves, hasTranspose: hasTr
+    };
+  }
+
+  function applyDetection(){
+    if(!rawXML){ detectEl.hidden = true; return; }
+    var d;
+    try{ d = detectSource(rawXML); }catch(e){ d = null; }
+    if(!d){ detectEl.hidden = true; return; }
+    if(!srcUserSet){ srcSel.value = d.srcKey; } // auto-pick unless the user overrode it
+    var html = "Detected source: <b>" + esc(d.family) + "</b>";
+    html += ' <span class="tag' + (d.uncertain ? " warn" : "") + '">' + esc(d.trLabel) + "</span>";
+    if(d.staves > 1){ html += ' <span class="tag">' + d.staves + "-staff — Melody only recommended</span>"; }
+    if(!srcUserSet && !d.uncertain){ html += ' <span class="tag">source set automatically</span>'; }
+    detectEl.innerHTML = html;
+    detectEl.hidden = false;
+  }
+
+  function esc(s){ return String(s).replace(/[&<>]/g, function(c){ return {"&":"&amp;","<":"&lt;",">":"&gt;"}[c]; }); }
+
+  function loadXML(xml){ rawXML = xml; srcUserSet = false; applyDetection(); draw(); }
 
   function setMode(m){
     mode = m;
@@ -540,7 +650,7 @@
 
   btnAlto.addEventListener("click", function(){ setMode("alto"); });
   btnOrig.addEventListener("click", function(){ setMode("orig"); });
-  srcSel.addEventListener("change", draw);
+  srcSel.addEventListener("change", function(){ srcUserSet = true; draw(); });
   octSel.addEventListener("change", draw);
   partSel.addEventListener("change", draw);
   btnPlay.addEventListener("click", play);
