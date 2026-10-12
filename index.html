@@ -177,11 +177,13 @@
       <button class="btn" id="url-load" type="button">Fetch link</button>
     </div>
     <div class="fetchrow">
-      <input type="search" id="q" spellcheck="false" placeholder="Search open tune libraries by name (e.g. Cooley's, Drowsy Maggie)">
-      <button class="btn" id="search" type="button">Search</button>
+      <input type="search" id="q" spellcheck="false" placeholder="Song name (e.g. Diễm Xưa, Cooley's, Hạ Trắng)">
+      <button class="btn" id="search" type="button">Search folk tunes</button>
+      <button class="btn" id="find-musescore" type="button">Find on MuseScore</button>
+      <button class="btn" id="find-web" type="button">Find on web</button>
     </div>
     <div class="results" id="results" hidden></div>
-    <p class="fetchnote">Fetching works only for sources that permit cross-origin requests &mdash; <b>raw GitHub links</b> are the reliable case. Search covers <b>thesession.org</b> (traditional / folk tunes only, not copyrighted pop). Keep any copyrighted files off public hosting.</p>
+    <p class="fetchnote"><b>Search folk tunes</b> loads directly from <b>thesession.org</b> (traditional / folk only). <b>Find on MuseScore</b> / <b>Find on web</b> open a search for the name in a new tab &mdash; use them for Vietnamese and other songs: locate a score there, download its MusicXML / <code>.mxl</code>, then load it with <b>Fetch link</b> or the file picker. <b>Fetch link</b> works only for sources that allow cross-origin requests (raw GitHub links are reliable). No free, legal service returns copyrighted songs' notation automatically. Keep copyrighted files off public hosting.</p>
   </div>
 
   <div class="io">
@@ -202,7 +204,7 @@
 
   <div class="notes">
     <h3>Getting music by name or link</h3>
-    <p><b>Fetch link</b> pulls a MusicXML/MEI/<code>.mxl</code> file straight from a URL, as long as that host allows cross-origin requests &mdash; raw GitHub file links are the dependable case. <b>Search</b> queries <a href="https://thesession.org" target="_blank" rel="noopener">thesession.org</a>, an open library of traditional and folk tunes; pick a result and it loads, transposes, and plays like any other input. There is no free, legal way to fetch copyrighted pop songs by name &mdash; Vietnamese or otherwise &mdash; so those are not searchable; export them from a notation app (or your own files) and load them here. The <b>Vietnamese folk tune</b> button loads a traditional, public-domain melody (<i>Kìa Con Bướm Vàng</i>) with its lyrics as a starting point.</p>
+    <p><b>Search folk tunes</b> queries <a href="https://thesession.org" target="_blank" rel="noopener">thesession.org</a> (traditional / folk only) and loads a result directly &mdash; transposed and playable like any input. For Vietnamese and other songs, <b>Find on MuseScore</b> and <b>Find on web</b> open a name search in a new tab; locate a score there, download its MusicXML / <code>.mxl</code>, then bring it back with <b>Fetch link</b> (any URL that allows cross-origin requests; raw GitHub links are dependable) or the file picker. No free, legal service returns copyrighted songs' notation automatically, so the tool helps you <i>find</i> a file rather than pretending it can fetch any song. The <b>Vietnamese folk tune</b> button loads a traditional, public-domain melody (<i>Kìa Con Bướm Vàng</i>) with lyrics as a ready example.</p>
     <h3>Source detection</h3>
     <p>On load, the tool reads the file's first part &mdash; its instrument name, General MIDI program, and any written-pitch <code>transpose</code> &mdash; and sets <b>Source part is written for</b> automatically (concert, B&flat;, F, or E&flat;). It also flags grand-staff piano files, where <b>Melody only</b> is the right choice. It is a best guess from the file's metadata; change the dropdown yourself and it stays on your choice.</p>
     <h3>Melody extraction</h3>
@@ -915,6 +917,17 @@
   urlEl.addEventListener("keydown", function(e){ if(e.key === "Enter"){ e.preventDefault(); if(tk) fetchUrl(urlEl.value.trim()); } });
   document.getElementById("search").addEventListener("click", function(){ searchTunes(qEl.value.trim()); });
   qEl.addEventListener("keydown", function(e){ if(e.key === "Enter"){ e.preventDefault(); searchTunes(qEl.value.trim()); } });
+  function findOn(base, suffix){
+    var q = qEl.value.trim();
+    if(!q){ errEl.textContent = "Type a song name first."; return; }
+    window.open(base + encodeURIComponent(q + (suffix || "")), "_blank", "noopener");
+  }
+  document.getElementById("find-musescore").addEventListener("click", function(){
+    findOn("https://musescore.com/sheetmusic?text=", "");
+  });
+  document.getElementById("find-web").addEventListener("click", function(){
+    findOn("https://www.google.com/search?q=", " musicxml tải sheet nhạc");
+  });
   resultsEl.addEventListener("click", function(e){
     var b = e.target.closest ? e.target.closest(".result") : null;
     if(b && tk){ loadTune(b.getAttribute("data-id")); }

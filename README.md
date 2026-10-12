@@ -39,15 +39,19 @@ Two ways to load without exporting a file yourself:
 - **Fetch link** downloads a MusicXML / MEI / `.mxl` from a URL and runs it through the
   normal pipeline. It only works when the host sends CORS headers; raw GitHub file links
   (`raw.githubusercontent.com/...`) are the reliable case.
-- **Search** queries [thesession.org](https://thesession.org), an open library of
-  traditional / folk tunes (CC-licensed ABC). A result is fetched as ABC, rendered and
+- **Search folk tunes** queries [thesession.org](https://thesession.org), an open library
+  of traditional / folk tunes (CC-licensed ABC). A result is fetched as ABC, rendered and
   transposed natively by Verovio, and played back from Verovio's MIDI export.
+- **Find on MuseScore** / **Find on web** open a name search in a new tab. Use these for
+  Vietnamese and other songs: find a score there, download its MusicXML / `.mxl`, then load
+  it with **Fetch link** or the file picker. The tool never fetches copyrighted content
+  itself — it only helps you locate a file to download.
 
-There is **no** free, legal way to fetch arbitrary copyrighted pop songs by name &mdash;
+There is **no** free, legal way to auto-fetch arbitrary copyrighted songs by name —
 Vietnamese or otherwise; no open API serves their MusicXML, and scraping score sites breaks
-their terms. For those, export MusicXML from a notation app and load the file. The
-**Vietnamese folk tune** button loads a traditional, public-domain melody (*Kìa Con Bướm
-Vàng*, sung to the Frère Jacques tune) with Vietnamese lyrics as a built-in example.
+their terms. The **Vietnamese folk tune** button loads a traditional, public-domain melody
+(*Kìa Con Bướm Vàng*, sung to the Frère Jacques tune) with Vietnamese lyrics as a built-in
+example.
 
 Verovio is pinned to a fixed version (`4.3.1`) rather than `latest`, because the rolling
 `latest` build changed its startup API and left the engine stuck on "loading".
